@@ -1,0 +1,12 @@
+# Force LF for all text files (important for Swift/Xcode on macOS CI)
+* text=auto eol=lf
+
+# Explicitly mark binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.xcodeproj binary

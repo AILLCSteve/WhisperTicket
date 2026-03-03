@@ -1,0 +1,245 @@
+{
+  "restaurant_id": "demo_restaurant",
+  "version": 1,
+  "currency": "USD",
+  "categories": [
+    {
+      "id": "cat_apps",
+      "name": "Appetizers",
+      "items": [
+        {
+          "id": "item_mozz",
+          "name": "Mozzarella Sticks",
+          "price": 9.99,
+          "description": "Served with marinara",
+          "tags": ["fried", "vegetarian"],
+          "modifier_groups": [
+            {
+              "id": "mg_sauce",
+              "name": "Sauce Choice",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_ranch", "name": "Ranch", "price_delta": 0.0},
+                {"id": "m_marinara", "name": "Marinara", "price_delta": 0.0},
+                {"id": "m_honey_mustard", "name": "Honey Mustard", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_caesar",
+          "name": "Caesar Salad",
+          "price": 11.99,
+          "description": "Romaine, croutons, parmesan",
+          "tags": ["salad", "vegetarian"],
+          "modifier_groups": [
+            {
+              "id": "mg_caesar_mods",
+              "name": "Modifications",
+              "required": false,
+              "max_select": 3,
+              "modifiers": [
+                {"id": "m_no_croutons", "name": "No Croutons", "price_delta": 0.0},
+                {"id": "m_dressing_side", "name": "Dressing on Side", "price_delta": 0.0},
+                {"id": "m_add_chicken", "name": "Add Chicken", "price_delta": 3.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": "GF? No croutons."
+        }
+      ]
+    },
+    {
+      "id": "cat_entrees",
+      "name": "Entrees",
+      "items": [
+        {
+          "id": "item_burger",
+          "name": "Classic Burger",
+          "price": 14.99,
+          "description": "8oz beef patty, lettuce, tomato, onion",
+          "tags": ["beef", "entree"],
+          "modifier_groups": [
+            {
+              "id": "mg_temp",
+              "name": "Temperature",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_rare", "name": "Rare", "price_delta": 0.0},
+                {"id": "m_med_rare", "name": "Medium Rare", "price_delta": 0.0},
+                {"id": "m_medium", "name": "Medium", "price_delta": 0.0},
+                {"id": "m_med_well", "name": "Medium Well", "price_delta": 0.0},
+                {"id": "m_well", "name": "Well Done", "price_delta": 0.0}
+              ]
+            },
+            {
+              "id": "mg_burger_mods",
+              "name": "Modifications",
+              "required": false,
+              "max_select": 5,
+              "modifiers": [
+                {"id": "m_no_onion", "name": "No Onion", "price_delta": 0.0},
+                {"id": "m_no_tomato", "name": "No Tomato", "price_delta": 0.0},
+                {"id": "m_add_bacon", "name": "Add Bacon", "price_delta": 2.0},
+                {"id": "m_add_cheese", "name": "Add Cheese", "price_delta": 1.0}
+              ]
+            }
+          ],
+          "upsell_links": [
+            {"type": "suggest", "target_item_id": "item_fries", "reason": "Pairs great with burger"}
+          ],
+          "kitchen_note_template": "Temp: ___. Mods: ___."
+        },
+        {
+          "id": "item_salmon",
+          "name": "Grilled Salmon",
+          "price": 22.99,
+          "description": "Atlantic salmon, seasonal vegetables",
+          "tags": ["fish", "entree", "gluten_free"],
+          "modifier_groups": [
+            {
+              "id": "mg_salmon_mods",
+              "name": "Modifications",
+              "required": false,
+              "max_select": 3,
+              "modifiers": [
+                {"id": "m_no_butter", "name": "No Butter", "price_delta": 0.0},
+                {"id": "m_extra_veg", "name": "Extra Vegetables", "price_delta": 2.0},
+                {"id": "m_sauce_side", "name": "Sauce on Side", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": "Allergy? GF by default."
+        },
+        {
+          "id": "item_steak",
+          "name": "Ribeye Steak",
+          "price": 34.99,
+          "description": "12oz ribeye, choice of side",
+          "tags": ["beef", "entree", "premium"],
+          "modifier_groups": [
+            {
+              "id": "mg_steak_temp",
+              "name": "Temperature",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_steak_rare", "name": "Rare", "price_delta": 0.0},
+                {"id": "m_steak_med_rare", "name": "Medium Rare", "price_delta": 0.0},
+                {"id": "m_steak_medium", "name": "Medium", "price_delta": 0.0},
+                {"id": "m_steak_med_well", "name": "Medium Well", "price_delta": 0.0},
+                {"id": "m_steak_well", "name": "Well Done", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": "Temp: ___."
+        }
+      ]
+    },
+    {
+      "id": "cat_sides",
+      "name": "Sides",
+      "items": [
+        {
+          "id": "item_fries",
+          "name": "French Fries",
+          "price": 4.99,
+          "description": "Crispy golden fries",
+          "tags": ["fried", "vegetarian", "side"],
+          "modifier_groups": [
+            {
+              "id": "mg_fries_mods",
+              "name": "Modifications",
+              "required": false,
+              "max_select": 2,
+              "modifiers": [
+                {"id": "m_extra_crispy", "name": "Extra Crispy", "price_delta": 0.0},
+                {"id": "m_seasoned", "name": "Seasoned", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_side_salad",
+          "name": "Side Salad",
+          "price": 5.99,
+          "description": "Mixed greens, house dressing",
+          "tags": ["salad", "vegetarian", "side"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        }
+      ]
+    },
+    {
+      "id": "cat_beverages",
+      "name": "Beverages",
+      "items": [
+        {
+          "id": "item_coke",
+          "name": "Coca-Cola",
+          "price": 2.99,
+          "description": "Fountain soda",
+          "tags": ["soft_drink", "beverage"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_water",
+          "name": "Water",
+          "price": 0.0,
+          "description": "Still or sparkling",
+          "tags": ["beverage", "soft_drink"],
+          "modifier_groups": [
+            {
+              "id": "mg_water_type",
+              "name": "Type",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_still", "name": "Still", "price_delta": 0.0},
+                {"id": "m_sparkling", "name": "Sparkling", "price_delta": 1.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_ipa",
+          "name": "IPA Draft Beer",
+          "price": 7.99,
+          "description": "Local craft IPA on draft",
+          "tags": ["beer", "alcohol", "beverage", "signature_cocktail"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        }
+      ]
+    }
+  ],
+  "upsell_rules": [
+    {
+      "id": "rule_drink_if_none",
+      "if": {"has_entree": true, "has_drink": false},
+      "suggest": [{"tag": "soft_drink"}, {"tag": "beer"}],
+      "playbook_script": "Can I start you off with something to drink? We have a great local IPA on draft."
+    },
+    {
+      "id": "rule_fries_with_burger",
+      "if": {"has_entree": false, "has_drink": false},
+      "suggest": [{"item_id": "item_fries"}],
+      "playbook_script": "Would you like to add fries? They're extra crispy today."
+    }
+  ]
+}

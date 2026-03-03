@@ -1,0 +1,89 @@
+import SwiftUI
+import SwiftData
+import AVFoundation
+
+@main
+struct WaitTicketApp: App {
+    let container: ModelContainer
+
+    // Services — swap concrete types here to switch local → Supabase
+    let audioCapture: AudioCaptureServiceProtocol = AudioCaptureService()
+    let transcriptionService: TranscriptionServiceProtocol = SFSpeechTranscriptionService()
+    let menuStore: MenuStoreProtocol = LocalBundleMenuStore()
+    let parser: OrderParserProtocol = FuzzyMenuOrderParser()
+    let upsellEngine: UpsellEngineProtocol = RuleBasedUpsellEngine()
+
+    init() {
+        do {
+            container = try ModelContainer(for: Ticket.self, GuestSeat.self, TicketItem.self, TicketModifier.self)
+        } catch {
+            fatalError("Failed to create ModelContainer: \(error)")
+        }
+
+        SFSpeechTranscriptionService.requestPermission { granted in
+            if !granted { print("⚠️ Speech recognition not authorized") }
+        }
+        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            if !granted { print("⚠️ Microphone not authorized") }
+        }
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .modelContainer(container)
+                .environment(\.appServices, AppServices(
+                    audioCapture: audioCapture,
+                    transcriptionService: transcriptionService,
+                    menuStore: menuStore,
+                    parser: parser,
+                    upsellEngine: upsellEngine,
+                    repository: SwiftDataTicketRepository(modelContext: container.mainContext)
+                ))
+                .task {
+                    try? await menuStore.loadMenu()
+                }
+        }
+    }
+}
+
+// MARK: - Service Container
+
+struct AppServices {
+    let audioCapture: AudioCaptureServiceProtocol
+    let transcriptionService: TranscriptionServiceProtocol
+    let menuStore: MenuStoreProtocol
+    let parser: OrderParserProtocol
+    let upsellEngine: UpsellEngineProtocol
+    let repository: TicketRepositoryProtocol
+}
+
+// Placeholder used only as @Entry default — the real services are always injected
+// by WaitTicketApp before any view renders. If this fires, something is wrong.
+private final class PlaceholderTicketRepository: TicketRepositoryProtocol {
+    func fetchAll() async throws -> [Ticket] { [] }
+    func fetchOpen() async throws -> [Ticket] { [] }
+    func save(_ ticket: Ticket) async throws {}
+    func delete(_ ticket: Ticket) async throws {}
+    func createTicket(from draft: TicketDraft, serverId: String) async throws -> Ticket {
+        fatalError("AppServices not injected into environment")
+    }
+}
+
+private final class PlaceholderMenuStore: MenuStoreProtocol {
+    var menu: MenuV1? = nil
+    func loadMenu() async throws {}
+    func findBestMatches(text: String, maxResults: Int) -> [(item: MenuItem, score: Double)] { [] }
+    func item(byId id: String) -> MenuItem? { nil }
+}
+
+extension EnvironmentValues {
+    @Entry var appServices: AppServices = AppServices(
+        audioCapture: AudioCaptureService(),
+        transcriptionService: SFSpeechTranscriptionService(),
+        menuStore: PlaceholderMenuStore(),
+        parser: FuzzyMenuOrderParser(),
+        upsellEngine: RuleBasedUpsellEngine(),
+        repository: PlaceholderTicketRepository()
+    )
+}
