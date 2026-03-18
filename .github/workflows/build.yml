@@ -26,44 +26,7 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
 
-      # ── Signing: install Distribution certificate ──────────────────────────
-      - name: Install Distribution certificate
-        run: |
-          set -euo pipefail
-          CERT_PATH="$RUNNER_TEMP/dist_cert.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
-
-          echo -n "${{ secrets.DIST_CERT_P12 }}" | base64 --decode > "$CERT_PATH"
-
-          security create-keychain -p "temp_keychain_pass" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "temp_keychain_pass" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" \
-            -k "$KEYCHAIN_PATH" \
-            -P "${{ secrets.DIST_CERT_P12_PASSWORD }}" \
-            -T /usr/bin/codesign
-          security set-key-partition-list \
-            -S apple-tool:,apple: -s -k "temp_keychain_pass" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-
-      # ── Signing: install App Store provisioning profile ────────────────────
-      - name: Install provisioning profile
-        run: |
-          set -euo pipefail
-          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
-          echo -n "${{ secrets.PROV_PROFILE_BASE64 }}" | base64 --decode > "$PROFILE_PATH"
-
-          # Extract UUID so Xcode can find the profile by name
-          PROFILE_UUID=$(
-            security cms -D -i "$PROFILE_PATH" \
-            | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin
-          )
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp "$PROFILE_PATH" \
-             ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
-          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
-
-      # ── App Store Connect API key (for profile downloads during export) ────
+      # ── App Store Connect API key — Xcode manages signing automatically ────
       - name: Write App Store Connect API key
         run: |
           mkdir -p ~/.private_keys
@@ -80,10 +43,12 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/WhisperTicket.xcarchive" \
             -configuration Release \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+            CODE_SIGN_STYLE=Automatic \
             2>&1 | tee build.log
 
       # ── Export + Upload (main branch only) ────────────────────────────────
@@ -91,7 +56,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           set -o pipefail
-          cat > /tmp/ExportOptions.plist << EOF
+          cat > /tmp/ExportOptions.plist << 'PLISTEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -99,24 +64,20 @@ jobs:
             <key>method</key>
             <string>app-store-connect</string>
             <key>teamID</key>
-            <string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <string>M37X5J35F8</string>
             <key>destination</key>
             <string>upload</string>
             <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>com.whisperticket.app</key>
-              <string>${{ secrets.PROV_PROFILE_BASE64 }}</string>
-            </dict>
+            <string>automatic</string>
           </dict>
           </plist>
-          EOF
+          PLISTEOF
 
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/WhisperTicket.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist /tmp/ExportOptions.plist \
+            -allowProvisioningUpdates \
             -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
@@ -127,7 +88,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           set -o pipefail
-          cat > /tmp/ExportOptions.plist << EOF
+          cat > /tmp/ExportOptions.plist << 'PLISTEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -135,19 +96,20 @@ jobs:
             <key>method</key>
             <string>app-store-connect</string>
             <key>teamID</key>
-            <string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <string>M37X5J35F8</string>
             <key>destination</key>
             <string>export</string>
             <key>signingStyle</key>
-            <string>manual</string>
+            <string>automatic</string>
           </dict>
           </plist>
-          EOF
+          PLISTEOF
 
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/WhisperTicket.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist /tmp/ExportOptions.plist \
+            -allowProvisioningUpdates \
             -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
