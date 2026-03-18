@@ -36,6 +36,7 @@ jobs:
       # ── Build ──────────────────────────────────────────────────────────────
       - name: Archive
         run: |
+          set -o pipefail
           xcodebuild archive \
             -project WhisperTicket.xcodeproj \
             -scheme WhisperTicket \
@@ -44,16 +45,18 @@ jobs:
             -configuration Release \
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
             CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
-            2>&1 | tee build.log | tail -80
+            2>&1 | tee build.log
 
       # ── Export + Upload (main branch only) ────────────────────────────────
       - name: Export & Upload to TestFlight
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
+          set -o pipefail
           cat > /tmp/ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -83,6 +86,7 @@ jobs:
       - name: Export IPA (PR builds)
         if: github.event_name == 'pull_request'
         run: |
+          set -o pipefail
           cat > /tmp/ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
