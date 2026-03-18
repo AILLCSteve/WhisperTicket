@@ -26,8 +26,45 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
 
-      # ── Signing setup ──────────────────────────────────────────────────────
-      - name: Write App Store Connect API Key
+      # ── Signing: install Distribution certificate ──────────────────────────
+      - name: Install Distribution certificate
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/dist_cert.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+
+          echo -n "${{ secrets.DIST_CERT_P12 }}" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "temp_keychain_pass" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "temp_keychain_pass" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "${{ secrets.DIST_CERT_P12_PASSWORD }}" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple: -s -k "temp_keychain_pass" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      # ── Signing: install App Store provisioning profile ────────────────────
+      - name: Install provisioning profile
+        run: |
+          set -euo pipefail
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          echo -n "${{ secrets.PROV_PROFILE_BASE64 }}" | base64 --decode > "$PROFILE_PATH"
+
+          # Extract UUID so Xcode can find the profile by name
+          PROFILE_UUID=$(
+            security cms -D -i "$PROFILE_PATH" \
+            | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin
+          )
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp "$PROFILE_PATH" \
+             ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+
+      # ── App Store Connect API key (for profile downloads during export) ────
+      - name: Write App Store Connect API key
         run: |
           mkdir -p ~/.private_keys
           printf '%s' "${{ secrets.ASC_API_KEY }}" \
@@ -44,12 +81,9 @@ jobs:
             -archivePath "$RUNNER_TEMP/WhisperTicket.xcarchive" \
             -configuration Release \
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
-            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
-            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             2>&1 | tee build.log
 
       # ── Export + Upload (main branch only) ────────────────────────────────
@@ -68,6 +102,13 @@ jobs:
             <string>${{ secrets.APPLE_TEAM_ID }}</string>
             <key>destination</key>
             <string>upload</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.whisperticket.app</key>
+              <string>${{ secrets.PROV_PROFILE_BASE64 }}</string>
+            </dict>
           </dict>
           </plist>
           EOF
@@ -76,13 +117,12 @@ jobs:
             -archivePath "$RUNNER_TEMP/WhisperTicket.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist /tmp/ExportOptions.plist \
-            -allowProvisioningUpdates \
             -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
-            2>&1 | tee -a build.log | tail -40
+            2>&1 | tee -a build.log
 
-      # Pull-request builds: export only (no upload), keep IPA for inspection
+      # ── Export only (PR builds) ────────────────────────────────────────────
       - name: Export IPA (PR builds)
         if: github.event_name == 'pull_request'
         run: |
@@ -98,6 +138,8 @@ jobs:
             <string>${{ secrets.APPLE_TEAM_ID }}</string>
             <key>destination</key>
             <string>export</string>
+            <key>signingStyle</key>
+            <string>manual</string>
           </dict>
           </plist>
           EOF
@@ -106,11 +148,10 @@ jobs:
             -archivePath "$RUNNER_TEMP/WhisperTicket.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist /tmp/ExportOptions.plist \
-            -allowProvisioningUpdates \
             -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
-            2>&1 | tee -a build.log | tail -40
+            2>&1 | tee -a build.log
 
       # ── Artifacts ─────────────────────────────────────────────────────────
       - name: Upload build log on failure
