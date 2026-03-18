@@ -207,14 +207,15 @@ print(f"   Profile name: {profile_resp['data']['attributes']['name']}")
 print("\n[5/5] Setting GitHub secrets...")
 
 def gh_set_secret(name, value):
+    # Pipe value via stdin to avoid Windows command-line length limits
     result = subprocess.run(
-        ["gh", "secret", "set", name, "--repo", args.repo, "--body", value],
-        capture_output=True, text=True,
+        ["gh", "secret", "set", name, "--repo", args.repo],
+        input=value, capture_output=True, text=True,
     )
     if result.returncode != 0:
         print(f"   ERROR setting {name}: {result.stderr}", file=sys.stderr)
         sys.exit(1)
-    print(f"   Set {name} OK")
+    print(f"   Set {name} OK ({len(value)} chars)")
 
 gh_set_secret("DIST_PRIVATE_KEY_PEM",   dist_key_pem)
 gh_set_secret("DIST_CERT_DER_B64",      cert_b64)        # base64-encoded DER
