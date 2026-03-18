@@ -118,6 +118,11 @@ jobs:
             <string>upload</string>
             <key>signingStyle</key>
             <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.whisperticket.app</key>
+              <string>WhisperTicket AppStore</string>
+            </dict>
           </dict>
           </plist>
           PLISTEOF
@@ -149,6 +154,11 @@ jobs:
             <string>export</string>
             <key>signingStyle</key>
             <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.whisperticket.app</key>
+              <string>WhisperTicket AppStore</string>
+            </dict>
           </dict>
           </plist>
           PLISTEOF
