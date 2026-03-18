@@ -217,13 +217,17 @@ def gh_set_secret(name, value):
         sys.exit(1)
     print(f"   Set {name} OK ({len(value)} chars)")
 
+profile_uuid = profile_resp["data"]["attributes"].get("uuid", "")
+
 gh_set_secret("DIST_PRIVATE_KEY_PEM",   dist_key_pem)
 gh_set_secret("DIST_CERT_DER_B64",      cert_b64)        # base64-encoded DER
 gh_set_secret("DIST_CERT_P12_PASSWORD", args.p12_password)
 gh_set_secret("PROV_PROFILE_BASE64",    profile_b64)
+gh_set_secret("PROV_PROFILE_UUID",      profile_uuid)
 
 print("\n" + "=" * 60)
-print("SUCCESS — 4 secrets set in GitHub repo.")
+print("SUCCESS — 5 secrets set in GitHub repo.")
+print(f"Profile UUID: {profile_uuid}")
 print(f"Repo: https://github.com/{args.repo}/settings/secrets/actions")
 print("=" * 60)
 print("Push any change to main and GitHub Actions will")

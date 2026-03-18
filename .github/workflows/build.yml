@@ -69,18 +69,9 @@ jobs:
         run: |
           set -euo pipefail
           PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          PROFILE_UUID="${{ secrets.PROV_PROFILE_UUID }}"
 
-          # Diagnostic: show secret length (never reveals content)
-          PROV_B64="${{ secrets.PROV_PROFILE_BASE64 }}"
-          echo "Profile b64 length: ${#PROV_B64}"
-
-          printf '%s' "$PROV_B64" | base64 -D > "$PROFILE_PATH"
-          echo "Profile file size: $(wc -c < "$PROFILE_PATH") bytes"
-
-          PROFILE_UUID=$(
-            security cms -D -i "$PROFILE_PATH" \
-            | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin
-          )
+          printf '%s' "${{ secrets.PROV_PROFILE_BASE64 }}" | base64 -D > "$PROFILE_PATH"
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp "$PROFILE_PATH" \
              ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
