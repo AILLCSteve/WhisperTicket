@@ -15,15 +15,26 @@ targets:
           - "**/*.json"
     resources:
       - path: ios/WhisperTicket/Resources/MenuV1.sample.json
+      - path: ios/WhisperTicket/Assets.xcassets
     info:
       path: ios/WhisperTicket/Info.plist
       properties:
+        CFBundleIconName: AppIcon
         UILaunchScreen:
           UIColorName: ""
         NSMicrophoneUsageDescription: "WhisperTicket needs your microphone to capture voice orders."
         NSSpeechRecognitionUsageDescription: "WhisperTicket transcribes orders on-device to build tickets."
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.whisperticket.app
@@ -34,3 +45,4 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: "M37X5J35F8"
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
