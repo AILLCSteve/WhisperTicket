@@ -1,32 +1,32 @@
-name: WaitTicket
+name: WhisperTicket
 options:
-  bundleIdPrefix: com.waitticket
+  bundleIdPrefix: com.whisperticket
   deploymentTarget:
     iOS: "17.0"
   xcodeVersion: "15"
 
 targets:
-  WaitTicket:
+  WhisperTicket:
     type: application
     platform: iOS
     sources:
-      - path: ios/WaitTicket
+      - path: ios/WhisperTicket
         excludes:
           - "**/*.json"
     resources:
-      - path: ios/WaitTicket/Resources/MenuV1.sample.json
+      - path: ios/WhisperTicket/Resources/MenuV1.sample.json
     info:
-      path: ios/WaitTicket/Info.plist
+      path: ios/WhisperTicket/Info.plist
       properties:
         UILaunchScreen:
           UIColorName: ""
-        NSMicrophoneUsageDescription: "WaitTicket needs your microphone to capture voice orders."
-        NSSpeechRecognitionUsageDescription: "WaitTicket transcribes orders on-device to build tickets."
+        NSMicrophoneUsageDescription: "WhisperTicket needs your microphone to capture voice orders."
+        NSSpeechRecognitionUsageDescription: "WhisperTicket transcribes orders on-device to build tickets."
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.waitticket.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.whisperticket.app
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TARGETED_DEVICE_FAMILY: "1,2"

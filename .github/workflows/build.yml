@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build WaitTicket
+    name: Build WhisperTicket
     runs-on: macos-latest
 
     steps:
@@ -29,8 +29,8 @@ jobs:
       - name: Build for simulator (no signing)
         run: |
           xcodebuild \
-            -project WaitTicket.xcodeproj \
-            -scheme WaitTicket \
+            -project WhisperTicket.xcodeproj \
+            -scheme WhisperTicket \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -configuration Debug \
             CODE_SIGN_IDENTITY="" \

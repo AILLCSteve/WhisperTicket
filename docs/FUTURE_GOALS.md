@@ -1,4 +1,4 @@
-# WaitTicket — Future Goals (High Complexity)
+# WhisperTicket — Future Goals (High Complexity)
 
 These features were explicitly deferred from MVP. Each entry includes recommended approach and trigger conditions.
 
@@ -83,7 +83,7 @@ These features were explicitly deferred from MVP. Each entry includes recommende
 **Approach:**
 - QR: `AVFoundation` `AVCaptureMetadataOutput` for QR scanning within `TableSelectView`
 - NFC: `CoreNFC` `NFCTagReaderSession` (requires `NFCReaderUsageDescription` entitlement)
-- Payload format: `waitticket://table/{tableNumber}` deep link or plain text
+- Payload format: `whisperticket://table/{tableNumber}` deep link or plain text
 - Restaurant provides QR stickers or NFC tags per table
 
 **Dependencies:** `NFCReaderUsageDescription` entitlement (paid Apple Developer account required for NFC), restaurant prints/programs tags

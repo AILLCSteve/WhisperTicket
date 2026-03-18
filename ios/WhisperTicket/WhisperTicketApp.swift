@@ -3,7 +3,7 @@ import SwiftData
 import AVFoundation
 
 @main
-struct WaitTicketApp: App {
+struct WhisperTicketApp: App {
     let container: ModelContainer
 
     // Services — swap concrete types here to switch local → Supabase
@@ -59,7 +59,7 @@ struct AppServices {
 }
 
 // Placeholder used only as @Entry default — the real services are always injected
-// by WaitTicketApp before any view renders. If this fires, something is wrong.
+// by WhisperTicketApp before any view renders. If this fires, something is wrong.
 private final class PlaceholderTicketRepository: TicketRepositoryProtocol {
     func fetchAll() async throws -> [Ticket] { [] }
     func fetchOpen() async throws -> [Ticket] { [] }

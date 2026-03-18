@@ -1,4 +1,4 @@
-# WaitTicket iOS App Implementation Plan
+# WhisperTicket iOS App Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -37,16 +37,16 @@
 ## Task 1: Data Models
 
 **Files:**
-- Create: `ios/WaitTicket/Models/MenuV1.swift`
-- Create: `ios/WaitTicket/Models/Ticket.swift`
-- Create: `ios/WaitTicket/Models/TicketDraft.swift`
+- Create: `ios/WhisperTicket/Models/MenuV1.swift`
+- Create: `ios/WhisperTicket/Models/Ticket.swift`
+- Create: `ios/WhisperTicket/Models/TicketDraft.swift`
 
 **Step 1: Write `MenuV1.swift`**
 
 Complete Codable structs matching the MenuV1 JSON schema. Must be pure value types (no SwiftData here — menu lives in memory from JSON bundle).
 
 ```swift
-// ios/WaitTicket/Models/MenuV1.swift
+// ios/WhisperTicket/Models/MenuV1.swift
 import Foundation
 
 struct MenuV1: Codable {
@@ -177,7 +177,7 @@ extension MenuItem {
 SwiftData persistent models. Each class is a SwiftData `@Model`. Relationships are explicit.
 
 ```swift
-// ios/WaitTicket/Models/Ticket.swift
+// ios/WhisperTicket/Models/Ticket.swift
 import Foundation
 import SwiftData
 
@@ -346,7 +346,7 @@ final class TicketModifier {
 In-memory draft produced by the parser. Not persisted until user confirms.
 
 ```swift
-// ios/WaitTicket/Models/TicketDraft.swift
+// ios/WhisperTicket/Models/TicketDraft.swift
 import Foundation
 
 struct TicketDraft {
@@ -412,12 +412,12 @@ enum VoiceMacro: String, CaseIterable {
 ## Task 2: Service Protocols
 
 **Files:**
-- Create: `ios/WaitTicket/Services/Protocols.swift`
+- Create: `ios/WhisperTicket/Services/Protocols.swift`
 
 **Step 1: Write all service protocols**
 
 ```swift
-// ios/WaitTicket/Services/Protocols.swift
+// ios/WhisperTicket/Services/Protocols.swift
 import Foundation
 import AVFoundation
 import Combine
@@ -498,12 +498,12 @@ struct UpsellSuggestionResult: Identifiable {
 ## Task 3: AudioCaptureService
 
 **Files:**
-- Create: `ios/WaitTicket/Services/AudioCaptureService.swift`
+- Create: `ios/WhisperTicket/Services/AudioCaptureService.swift`
 
 **Step 1: Implement AudioCaptureService**
 
 ```swift
-// ios/WaitTicket/Services/AudioCaptureService.swift
+// ios/WhisperTicket/Services/AudioCaptureService.swift
 import AVFoundation
 import Combine
 
@@ -565,12 +565,12 @@ final class AudioCaptureService: AudioCaptureServiceProtocol {
 ## Task 4: SFSpeechTranscriptionService
 
 **Files:**
-- Create: `ios/WaitTicket/Services/SFSpeechTranscriptionService.swift`
+- Create: `ios/WhisperTicket/Services/SFSpeechTranscriptionService.swift`
 
 **Step 1: Implement SFSpeechTranscriptionService**
 
 ```swift
-// ios/WaitTicket/Services/SFSpeechTranscriptionService.swift
+// ios/WhisperTicket/Services/SFSpeechTranscriptionService.swift
 import Speech
 import AVFoundation
 import Combine
@@ -644,8 +644,8 @@ enum TranscriptionError: Error {
 ## Task 5: LocalBundleMenuStore
 
 **Files:**
-- Create: `ios/WaitTicket/Services/LocalBundleMenuStore.swift`
-- Create: `ios/WaitTicket/Resources/MenuV1.sample.json`
+- Create: `ios/WhisperTicket/Services/LocalBundleMenuStore.swift`
+- Create: `ios/WhisperTicket/Resources/MenuV1.sample.json`
 
 **Step 1: Write sample menu JSON**
 
@@ -900,7 +900,7 @@ enum TranscriptionError: Error {
 **Step 2: Implement LocalBundleMenuStore**
 
 ```swift
-// ios/WaitTicket/Services/LocalBundleMenuStore.swift
+// ios/WhisperTicket/Services/LocalBundleMenuStore.swift
 import Foundation
 
 final class LocalBundleMenuStore: MenuStoreProtocol {
@@ -976,12 +976,12 @@ enum MenuStoreError: Error {
 ## Task 6: FuzzyMenuOrderParser
 
 **Files:**
-- Create: `ios/WaitTicket/Services/FuzzyMenuOrderParser.swift`
+- Create: `ios/WhisperTicket/Services/FuzzyMenuOrderParser.swift`
 
 **Step 1: Implement parser**
 
 ```swift
-// ios/WaitTicket/Services/FuzzyMenuOrderParser.swift
+// ios/WhisperTicket/Services/FuzzyMenuOrderParser.swift
 import Foundation
 
 final class FuzzyMenuOrderParser: OrderParserProtocol {
@@ -1225,12 +1225,12 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
 ## Task 7: RuleBasedUpsellEngine
 
 **Files:**
-- Create: `ios/WaitTicket/Services/RuleBasedUpsellEngine.swift`
+- Create: `ios/WhisperTicket/Services/RuleBasedUpsellEngine.swift`
 
 **Step 1: Implement upsell engine**
 
 ```swift
-// ios/WaitTicket/Services/RuleBasedUpsellEngine.swift
+// ios/WhisperTicket/Services/RuleBasedUpsellEngine.swift
 import Foundation
 
 final class RuleBasedUpsellEngine: UpsellEngineProtocol {
@@ -1282,12 +1282,12 @@ final class RuleBasedUpsellEngine: UpsellEngineProtocol {
 ## Task 8: SwiftDataTicketRepository
 
 **Files:**
-- Create: `ios/WaitTicket/Services/SwiftDataTicketRepository.swift`
+- Create: `ios/WhisperTicket/Services/SwiftDataTicketRepository.swift`
 
 **Step 1: Implement repository**
 
 ```swift
-// ios/WaitTicket/Services/SwiftDataTicketRepository.swift
+// ios/WhisperTicket/Services/SwiftDataTicketRepository.swift
 import Foundation
 import SwiftData
 
@@ -1395,15 +1395,15 @@ final class SwiftDataTicketRepository: TicketRepositoryProtocol {
 ## Task 9: ViewModels
 
 **Files:**
-- Create: `ios/WaitTicket/ViewModels/TableSelectViewModel.swift`
-- Create: `ios/WaitTicket/ViewModels/LiveSessionViewModel.swift`
-- Create: `ios/WaitTicket/ViewModels/TicketEditorViewModel.swift`
-- Create: `ios/WaitTicket/ViewModels/TicketsListViewModel.swift`
+- Create: `ios/WhisperTicket/ViewModels/TableSelectViewModel.swift`
+- Create: `ios/WhisperTicket/ViewModels/LiveSessionViewModel.swift`
+- Create: `ios/WhisperTicket/ViewModels/TicketEditorViewModel.swift`
+- Create: `ios/WhisperTicket/ViewModels/TicketsListViewModel.swift`
 
 **Step 1: `TableSelectViewModel.swift`**
 
 ```swift
-// ios/WaitTicket/ViewModels/TableSelectViewModel.swift
+// ios/WhisperTicket/ViewModels/TableSelectViewModel.swift
 import Foundation
 import Observation
 
@@ -1436,7 +1436,7 @@ final class TableSelectViewModel {
 **Step 2: `LiveSessionViewModel.swift`**
 
 ```swift
-// ios/WaitTicket/ViewModels/LiveSessionViewModel.swift
+// ios/WhisperTicket/ViewModels/LiveSessionViewModel.swift
 import Foundation
 import Observation
 import Combine
@@ -1592,7 +1592,7 @@ final class LiveSessionViewModel {
 **Step 3: `TicketEditorViewModel.swift`**
 
 ```swift
-// ios/WaitTicket/ViewModels/TicketEditorViewModel.swift
+// ios/WhisperTicket/ViewModels/TicketEditorViewModel.swift
 import Foundation
 import Observation
 
@@ -1685,7 +1685,7 @@ final class TicketEditorViewModel {
 **Step 4: `TicketsListViewModel.swift`**
 
 ```swift
-// ios/WaitTicket/ViewModels/TicketsListViewModel.swift
+// ios/WhisperTicket/ViewModels/TicketsListViewModel.swift
 import Foundation
 import Observation
 
@@ -1721,17 +1721,17 @@ final class TicketsListViewModel {
 ## Task 10: App Entry + Environment Setup
 
 **Files:**
-- Create: `ios/WaitTicket/WaitTicketApp.swift`
+- Create: `ios/WhisperTicket/WhisperTicketApp.swift`
 
 **Step 1: Write app entry point**
 
 ```swift
-// ios/WaitTicket/WaitTicketApp.swift
+// ios/WhisperTicket/WhisperTicketApp.swift
 import SwiftUI
 import SwiftData
 
 @main
-struct WaitTicketApp: App {
+struct WhisperTicketApp: App {
     let container: ModelContainer
 
     // Services (local implementations; swap to Supabase versions here later)
@@ -1801,17 +1801,17 @@ extension EnvironmentValues {
 ## Task 11: Views — Core Screens
 
 **Files:**
-- Create: `ios/WaitTicket/Views/ContentView.swift`
-- Create: `ios/WaitTicket/Views/TableSelectView.swift`
-- Create: `ios/WaitTicket/Views/LiveSessionView.swift`
-- Create: `ios/WaitTicket/Views/TicketEditorView.swift`
-- Create: `ios/WaitTicket/Views/TicketsListView.swift`
-- Create: `ios/WaitTicket/Views/MenuAdminView.swift`
+- Create: `ios/WhisperTicket/Views/ContentView.swift`
+- Create: `ios/WhisperTicket/Views/TableSelectView.swift`
+- Create: `ios/WhisperTicket/Views/LiveSessionView.swift`
+- Create: `ios/WhisperTicket/Views/TicketEditorView.swift`
+- Create: `ios/WhisperTicket/Views/TicketsListView.swift`
+- Create: `ios/WhisperTicket/Views/MenuAdminView.swift`
 
 **Step 1: `ContentView.swift`**
 
 ```swift
-// ios/WaitTicket/Views/ContentView.swift
+// ios/WhisperTicket/Views/ContentView.swift
 import SwiftUI
 
 struct ContentView: View {
@@ -1831,7 +1831,7 @@ struct ContentView: View {
 **Step 2: `TableSelectView.swift`**
 
 ```swift
-// ios/WaitTicket/Views/TableSelectView.swift
+// ios/WhisperTicket/Views/TableSelectView.swift
 import SwiftUI
 
 struct TableSelectView: View {
@@ -1918,7 +1918,7 @@ struct TableSelectView: View {
 **Step 3: `LiveSessionView.swift`**
 
 ```swift
-// ios/WaitTicket/Views/LiveSessionView.swift
+// ios/WhisperTicket/Views/LiveSessionView.swift
 import SwiftUI
 
 struct LiveSessionView: View {
@@ -2216,7 +2216,7 @@ struct UpsellSuggestionsView: View {
 **Step 4: `TicketEditorView.swift`**
 
 ```swift
-// ios/WaitTicket/Views/TicketEditorView.swift
+// ios/WhisperTicket/Views/TicketEditorView.swift
 import SwiftUI
 
 struct TicketEditorView: View {
@@ -2433,7 +2433,7 @@ struct CourseControlRow: View {
 **Step 5: `TicketsListView.swift`**
 
 ```swift
-// ios/WaitTicket/Views/TicketsListView.swift
+// ios/WhisperTicket/Views/TicketsListView.swift
 import SwiftUI
 
 struct TicketsListView: View {
@@ -2536,7 +2536,7 @@ struct StatusBadge: View {
 **Step 6: `MenuAdminView.swift`**
 
 ```swift
-// ios/WaitTicket/Views/MenuAdminView.swift
+// ios/WhisperTicket/Views/MenuAdminView.swift
 import SwiftUI
 
 struct MenuAdminView: View {
@@ -2608,12 +2608,12 @@ struct MenuAdminView: View {
 ## Task 12: Seat Map View (Medium Complexity)
 
 **Files:**
-- Create: `ios/WaitTicket/Views/Components/SeatMapView.swift`
+- Create: `ios/WhisperTicket/Views/Components/SeatMapView.swift`
 
 **Step 1: Implement seat map**
 
 ```swift
-// ios/WaitTicket/Views/Components/SeatMapView.swift
+// ios/WhisperTicket/Views/Components/SeatMapView.swift
 import SwiftUI
 
 struct SeatMapView: View {
@@ -2760,7 +2760,7 @@ on:
 
 jobs:
   build:
-    name: Build WaitTicket
+    name: Build WhisperTicket
     runs-on: macos-latest
 
     steps:
@@ -2775,8 +2775,8 @@ jobs:
       - name: Build for simulator (no signing)
         run: |
           xcodebuild \
-            -project ios/WaitTicket/WaitTicket.xcodeproj \
-            -scheme WaitTicket \
+            -project ios/WhisperTicket/WhisperTicket.xcodeproj \
+            -scheme WhisperTicket \
             -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
             -configuration Debug \
             CODE_SIGN_IDENTITY="" \
@@ -2788,8 +2788,8 @@ jobs:
       - name: Run unit tests
         run: |
           xcodebuild test \
-            -project ios/WaitTicket/WaitTicket.xcodeproj \
-            -scheme WaitTicket \
+            -project ios/WhisperTicket/WhisperTicket.xcodeproj \
+            -scheme WhisperTicket \
             -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
@@ -2820,7 +2820,7 @@ jobs:
 Document all high-complexity features as tracked future work:
 
 ```markdown
-# WaitTicket — Future Goals (High Complexity)
+# WhisperTicket — Future Goals (High Complexity)
 
 These features were explicitly deferred from MVP. Each has notes on recommended approach when the time comes.
 

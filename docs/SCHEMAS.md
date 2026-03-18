@@ -1,4 +1,4 @@
-# WaitTicket Data Schemas
+# WhisperTicket Data Schemas
 
 ## MenuV1
 

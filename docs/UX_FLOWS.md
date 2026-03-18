@@ -1,4 +1,4 @@
-# WaitTicket UX Flows
+# WhisperTicket UX Flows
 
 ## Primary Flow: Take an Order
 
