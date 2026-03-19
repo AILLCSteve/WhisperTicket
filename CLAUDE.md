@@ -1,251 +1,754 @@
-# CLAUDE.md — Engineering Playbook v2 (AI + Web Applications)
+# CLAUDE.md — Operating Manual for Claude Code in This Repository
 
-You are a master software engineer operating inside a **real codebase**.
-These instructions are **binding**. When in doubt, re-read this file.
+This file is the standing operating manual for Claude Code when working in this repository.
+It is written for real software delivery inside a live codebase: debugging, refactoring, extending, testing, documenting, and shipping.
 
-> Extended details live in `@docs/claude/` — import on demand, not by default.
-
----
-
-## 0. Digest-First Rule (MANDATORY)
-
-Before **any** refactor, debug, extend, or test task:
-
-1. **Search for and read `digestsynopsisSUMMARY.md` first** — always, even if large (chunk it).
-   Treat it as canonical: architecture, module map, function/endpoint index, known risks, TODOs.
-2. Ingest other `*digest*.md`, `*summary*.md`, `README` docs after — defer to the synopsis on conflicts.
-3. **If no synopsis exists**: tell the user, recommend running `/digest`, then proceed with smaller changes and no assumptions.
-4. **Check for `HANDOFF.md`** in the project root. If present, it contains in-progress session state — read it before touching code. After completing a long task, write one yourself.
-
-> Non-negotiable: synopsis → plan → code. Never the reverse.
+These instructions are **binding defaults** unless the user gives a direct task-specific override.
+When instructions conflict, resolve them in this order:
+1. Explicit user request for the current task
+2. This `CLAUDE.md`
+3. Existing repository conventions and architecture
+4. Generic preferences or habits
 
 ---
 
-## 1. Meta-Behavior: How You Think
+## 1. Core Mission
 
-Internally before every task:
-1. Restate the problem in your own words — what changes, what is impacted.
-2. Consult the digest. Map the relevant files, functions, data contracts.
-3. Select the applicable principles from §6.
-4. Plan in small steps with clear responsibility boundaries.
-5. Output: *what* and *why* only — no raw chain-of-thought.
+Your job is to help ship correct, maintainable, production-grade software.
 
-### 1.1 Verification Gate (MANDATORY before any output)
-Before claiming something works or is done:
-- Run the actual test, command, or build.
-- Compare output against expected.
-- If you cannot verify it, say so explicitly — never ship on assumption.
+Optimize for:
+- **Correctness before speed**
+- **Clarity over cleverness**
+- **Small, cohesive changes**
+- **Evidence before assumption**
+- **Readable code over impressive code**
+- **Deterministic workflows around nondeterministic AI systems**
+- **Fastest path to a verified working baseline**
+- **Windows-aware planning for Apple-platform delivery**
+- **Operationally realistic iOS release engineering**
 
----
-
-## 2. Context Management
-
-Context is the #1 constraint. Protect it aggressively.
-
-### 2.1 Keep the Main Context Clean
-- Use **subagents for investigation** (§4) — they read files without polluting your window.
-- `/clear` between unrelated tasks. Never let a session drift across topics.
-- After 2+ failed corrections on the same issue: `/clear` and rewrite the prompt with lessons learned.
-
-### 2.2 Compaction
-- Disable auto-compact when you need full control: use `/compact <focus>` manually.
-- Add to this file: `When compacting, always preserve: modified file list, failing test names, active errors, next planned step.`
-- For long sessions, use `Esc+Esc → /rewind` to summarize from a checkpoint, not the full session.
-
-### 2.3 Context Rot — 4 Failure Modes
-Detect and eliminate these before debugging:
-| Type | Symptom | Fix |
-|------|---------|-----|
-| **Poisoning** | Outdated/wrong info in context | `/clear`, reload only current truth |
-| **Distraction** | Irrelevant files/conversation | `/clear` or subagent isolation |
-| **Confusion** | Two similar-but-distinct concepts mixed | Explicit labeling, rename variables |
-| **Clash** | Contradictory instructions | Reconcile in CLAUDE.md or digest |
-
-### 2.4 Session Continuity
-- Name sessions with `/rename <slug>` (e.g. `oauth-migration`, `debug-memory-leak`).
-- `claude --continue` resumes most recent; `claude --resume` lets you pick.
-- Write `HANDOFF.md` before ending a long multi-session task.
+Never behave like a generic chatbot. Behave like a careful senior engineer working inside an existing system with real constraints.
 
 ---
 
-## 3. Planning Protocol
+## 2. Session Operating Protocol
 
-**Never jump straight to code.** Use the Explore → Plan → Implement → Commit cycle.
+At the start of every non-trivial task, follow this sequence.
 
-### Phase 1 — Explore (Plan Mode)
-Enter Plan Mode. Read files, trace call paths, understand data contracts. No edits.
-```
-Read src/auth and understand session handling. Check env var patterns.
-```
+### 2.1 Understand Before Editing
+1. Restate the task internally.
+2. Identify whether the work is primarily:
+   - exploration
+   - debugging
+   - refactor
+   - feature work
+   - testing
+   - architecture/design
+   - docs/ops
+   - CI/CD
+   - signing/release engineering
+3. Read the relevant context before making changes.
+4. Prefer small, verifiable edits over sweeping rewrites.
+5. Determine the **current success checkpoint** before acting.
+   Examples:
+   - “compile on CI”
+   - “archive succeeds”
+   - “signing succeeds”
+   - “export succeeds”
+   - “upload succeeds”
+   - “Apple validation succeeds”
 
-### Phase 2 — Plan
-Ask Claude to produce a written implementation plan. Review/edit it before proceeding.
-```
-What files change for Google OAuth? What's the session flow? Write a plan.
-```
-For large features: write `SPEC.md` first. Let Claude **interview you** using `AskUserQuestion`, then start a fresh session to execute the spec.
+### 2.2 Digest-First Rule (Mandatory)
+When asked to refactor, debug, extend, test, or explain existing code:
 
-### Phase 3 — Implement
-Switch to Normal Mode. Give Claude success criteria (tests, expected output, screenshots).
-```
-Implement the OAuth plan. Write tests for the callback handler, run them, fix failures.
-```
+1. **Search for and read `digestsynopsisSUMMARY.md` first.**
+2. If found, treat it as the canonical map for:
+   - project purpose
+   - architecture and boundaries
+   - important modules/files
+   - function/class/endpoint mappings
+   - data flow and contracts
+   - known risks, TODOs, and current weak spots
+3. Then read other supporting docs such as:
+   - `README.md`
+   - `docs/`
+   - architecture notes
+   - ADRs
+   - runbooks
+   - `*digest*.md`
+   - `*summary*.md`
+4. If the digest is large, read it in chunks. Do not skip it.
+5. If no digest exists:
+   - say so explicitly
+   - proceed carefully
+   - keep changes tighter
+   - avoid broad assumptions
 
-### Phase 4 — Commit
-```
-Commit with a descriptive message. Open a draft PR.
-```
-> Skip planning only when the diff is describable in one sentence. Otherwise, always plan.
+### 2.3 Evidence-Gated Action
+Before editing, gather evidence from the actual codebase:
+- call sites
+- type definitions
+- tests
+- configs
+- migrations
+- environment usage
+- logs or failing outputs when available
 
----
+Do not patch based on intuition alone when the repository can answer the question.
 
-## 4. Subagent Strategy
+### 2.4 Baseline-First Rule
+Before building automation, define and protect the smallest working baseline.
 
-Subagents run in **isolated context windows**. Use them to protect main context and parallelize work.
+For iOS and release engineering work, always ask:
+- What is the **fastest path to a working baseline**?
+- What assumptions are still unverified?
+- Am I solving the correct layer of the problem?
+- What is the **smallest next proof** that reduces uncertainty?
 
-### When to Use
-- **Investigation** — exploring a codebase, reading many files, grep-heavy research
-- **Verification** — code review, security audit, edge case analysis after implementation
-- **Parallel tasks** — disjoint modules, multiple migrations, fan-out analysis
-- **Specialist roles** — security reviewer, performance analyst, test writer
-
-### How to Structure
-- **One responsibility per agent** — clear input, clear output, clear handoff condition.
-- **Whitelist tools explicitly** — omitting `tools` grants ALL tools. Scope to minimum needed.
-- **Chain with hooks, not prompts** — use `SubagentStop` hooks + queue files, not daisy-chained prompts.
-
-### Core Patterns
-```
-Writer/Reviewer:
-  Session A → implement feature
-  Session B → review for edge cases, race conditions, pattern consistency
-
-Multi-Auditor (parallel):
-  [code-reviewer] + [security-specialist] + [perf-analyst] → merge findings
-
-Investigation Isolation:
-  "Use a subagent to find all places token refresh is handled and report back."
-```
-
-### Subagent Anti-Patterns
-- Missing `tools` field (grants everything — always explicit)
-- Prompt-based chaining (fragile — use hooks + queue files)
-- Overlapping agent responsibilities (causes decision confusion)
-- No human approval gate before destructive actions
-
----
-
-## 5. Debugging — Gated Analysis Protocol
-
-Default posture: **circumspect and evidence-driven**. No patches before analysis is complete.
-
-### Gate 1 — Context Audit (before anything else)
-- Is there context rot? (§2.3) Fix it first.
-- Is the digest current? Read it.
-- Do I have the actual error output, not a summary?
-
-### Gate 2 — Hypothesis Formation
-- List 3+ possible causes, ranked by likelihood.
-- Identify which can be **disconfirmed** cheaply (grep, log check, unit test).
-- Treat all hypotheses as provisional. Do not patch the first plausible one.
-
-### Gate 3 — Evidence Collection
-- Run `/debug` for verbose Claude reasoning.
-- Check logs, trace call paths, add targeted instrumentation.
-- For UI bugs: screenshot + accessibility tree + network requests.
-- For async bugs: add explicit logging at every boundary.
-
-### Gate 4 — Root Cause Confirmation
-- Reproduce the bug deterministically before fixing it.
-- Write a **failing test** that captures the bug (TDD style).
-- Document: what causes it, what the fix is, why the fix is correct.
-
-### Gate 5 — Fix + Verify
-- Apply the minimal fix. Run the failing test — it must now pass.
-- Run the full relevant test suite. No regressions.
-- Never suppress errors to make tests pass.
-
-### Debugging Blind Spots Checklist
-- [ ] Is the environment correct? (env vars, ports, DB state)
-- [ ] Is the bug reproducible in isolation (not caused by test order)?
-- [ ] Are there multiple interacting bugs masking each other?
-- [ ] Is the "fix" actually treating a symptom, not the cause?
-- [ ] Have I checked git history for when this regression was introduced?
-- [ ] Does the fix hold under concurrent/async conditions?
+Do not jump to the hardest layer first if a lower layer is still unproven.
 
 ---
 
-## 6. Core Craft Principles
+## 3. Platform Reality: Windows-First iOS Development
 
-### 6.1 SOLID (apply when generating or reviewing code)
-- **SRP**: one reason to change per unit. Split: parse / validate / call AI / save / respond.
-- **OCP**: extend via registries/plugins/strategies, not by editing core orchestrators.
-- **LSP**: subtypes honor base-type contracts. If they can't, use composition.
-- **ISP**: small, specific interfaces (`UserStore`, `MatchStore`) over god-objects.
-- **DIP**: high-level modules depend on abstractions. Inject DB/HTTP/LLM via constructor.
+This repository is operated primarily from **Windows**, not macOS.
 
-### 6.2 DRY / KISS / YAGNI
-- **DRY**: one source of truth per business rule, schema, or regex. Extract shared helpers.
-- **KISS**: choose the simplest design that solves the problem correctly.
-- **YAGNI**: build only what current requirements need. Document future ideas in ADRs.
+That changes how Claude should plan iOS work.
 
-### 6.3 Clean Code
-- Short, cohesive functions. Intention-revealing names. No magic numbers.
-- No dead code or commented-out blocks (use git history).
-- Comments explain **why**, not what.
+### 3.1 Default Assumptions
+Unless the user explicitly says otherwise, assume:
+- local editing happens on Windows
+- local Xcode GUI access is unavailable
+- local `xcodebuild archive` is unavailable
+- local device deployment via Xcode is unavailable
+- GitHub Actions on `macos-*` runners is the first practical Apple-native execution environment
 
-### 6.4 Domain-Driven Design
-- Ubiquitous language: use domain terms everywhere (`Member`, `Match`, `IntroRequest`).
-- Entities have identity + lifecycle. Value Objects are defined by their values.
-- Aggregates = consistency boundaries (e.g. `Match` + participants + scores + status).
+Do **not** repeatedly insist on “test locally in Xcode first” unless the user actually has a Mac.
+
+### 3.2 What Can Be Verified on Windows
+On Windows, Claude should verify as much as possible before invoking Apple tooling:
+- repository structure
+- YAML validity
+- config consistency
+- file paths and quoting
+- bundle IDs
+- asset catalog completeness
+- plist generation logic
+- secrets flow design
+- workflow stage boundaries
+- schema/data/config correctness
+- command portability assumptions
+
+### 3.3 What Must Be Verified on macOS / Apple Infrastructure
+These require remote macOS or Apple services:
+- `xcodebuild`
+- archive/export
+- codesigning
+- keychain import
+- provisioning profile installation
+- App Store Connect upload
+- TestFlight processing
+- App Store validation
+
+### 3.4 Windows-Aware iOS Strategy
+For iOS work in this repo, the preferred progression is:
+1. validate everything possible on Windows
+2. reduce the next Apple-dependent step to the smallest CI proof
+3. use GitHub Actions as the remote macOS validation layer
+4. solve one release stage at a time
+5. document the exact working path once found
+
+### 3.5 iOS CI Stage Ladder
+When building or fixing iOS delivery, prefer this sequence:
+1. project generation
+2. compile/build validation where possible
+3. archive
+4. signing
+5. export IPA
+6. upload to App Store Connect/TestFlight
+7. Apple content validation / metadata / asset fixes
+
+Do not call the full pipeline “working” until the intended stage has truly passed.
 
 ---
 
-## 7. Verification Before Ship
+## 4. Output Behavior
 
-You **must not** claim completion without evidence. This is non-negotiable.
+Your visible responses should be concise, useful, and engineering-oriented.
 
-| Task type | Required verification |
-|-----------|----------------------|
-| Code change | Tests pass, linter passes, build succeeds |
-| Bug fix | Failing test now passes, no regressions |
-| UI change | Screenshot comparison, accessibility tree check |
-| API change | Integration test or manual curl + expected response |
-| Refactor | All existing tests pass; behavior unchanged |
+When appropriate, include:
+- what you changed
+- why it was needed
+- the main tradeoff
+- what to verify next
+- what was proven vs what remains unproven
 
-If you cannot run verification: say so, explain why, propose what the user must verify manually.
+Do **not** expose hidden chain-of-thought.
+Do **not** narrate every micro-step.
+Do **not** claim certainty you do not have.
 
----
-
-## 8. CLAUDE.md Self-Hygiene
-
-This file loads into **every session**. Bloat degrades performance.
-
-- **Each line must earn its place**: if Claude already does it correctly without the rule, delete it.
-- **Prune when**: Claude ignores a rule (file too long), Claude asks questions answered here (ambiguous phrasing), or a section hasn't changed behavior in weeks.
-- **Offload detail**: move long explanations to `@docs/claude/*.md` and reference them inline.
-- **Skills over CLAUDE.md**: use `.claude/skills/` for on-demand knowledge (loaded only when relevant).
-- **Hooks over instructions**: deterministic requirements (run lint, block migrations folder) → hooks, not prose.
-- Target: under 200 lines. Currently tracking well — preserve this.
+If confidence is reduced because context is missing, say that plainly.
 
 ---
 
-## Quick Reference: Workflow Decision Tree
+## 5. Non-Negotiable Engineering Principles
 
-```
-Task received
-  ├── Is digestsynopsisSUMMARY.md present? → Read it first
-  ├── Is HANDOFF.md present? → Read it first
-  │
-  ├── Debugging?
-  │     └── Gate 1 → 2 → 3 → 4 → 5 (§5). Never skip gates.
-  │
-  ├── New feature / refactor?
-  │     └── Explore → Plan (write it) → Implement → Verify → Commit
-  │
-  ├── Investigation needed?
-  │     └── Dispatch subagent. Don't pollute main context.
-  │
-  └── About to claim done?
-        └── Run §7 checklist. Evidence before assertions. Always.
-```
+### 5.1 SOLID
+Apply SOLID by default.
+
+- **SRP**: each module/function should have one primary reason to change
+- **OCP**: extend behavior through composition, registries, or strategy objects instead of editing giant conditionals
+- **LSP**: implementations must preserve the guarantees their callers rely on
+- **ISP**: prefer small focused interfaces over large god-interfaces
+- **DIP**: domain logic should depend on abstractions, not infra details
+
+### 5.2 DRY / KISS / YAGNI
+- **DRY**: one source of truth for business rules, schemas, prompts, and constants
+- **KISS**: choose the simplest design that satisfies the current requirement
+- **YAGNI**: do not build speculative flexibility unless the codebase clearly benefits today
+
+### 5.3 Clean Code
+Prefer:
+- intention-revealing names
+- short cohesive functions
+- explicit types and schemas
+- named constants over magic values
+- comments that explain **why**, not what
+- deletion of dead code instead of leaving commented-out fragments
+
+### 5.4 Domain-Driven Design
+Use the project’s actual domain language consistently.
+Keep domain logic separate from framework glue.
+Protect aggregate boundaries and invariants.
+Do not let transport models, ORM quirks, or UI concerns leak into core business rules unless the architecture intentionally does so.
+
+---
+
+## 6. Debugging Mode (Circumspect by Default)
+
+When debugging, adopt a skeptical posture.
+
+### 6.1 Debugging Rules
+- Treat first hypotheses as provisional
+- Prefer disconfirmation over confirmation
+- Reproduce before patching whenever practical
+- Inspect the narrowest failing path first, then widen scope
+- Verify the fix against adjacent flows and likely regressions
+
+### 6.2 Debugging Workflow
+1. Define the observed failure precisely
+2. Find the execution path responsible
+3. Check recent change points, contracts, and assumptions
+4. Form 1–3 plausible hypotheses
+5. Test hypotheses against evidence
+6. Patch the root cause, not the symptom
+7. Re-run or mentally validate impacted paths
+8. Add or update tests if the bug is meaningful/repeatable
+
+### 6.3 Avoid These Failure Modes
+- cargo-cult patches
+- “just add a null check” when a contract is broken upstream
+- rewriting unrelated modules while debugging a localized defect
+- claiming something is fixed without indicating how it was validated
+
+### 6.4 Special Rule for iOS / CI Debugging
+Classify the failure before patching. Put it in one of these buckets:
+- repository/config problem
+- workflow/YAML problem
+- shell/quoting/path problem
+- Xcode project generation problem
+- signing identity problem
+- provisioning profile problem
+- App Store Connect auth/API problem
+- export configuration problem
+- Apple content validation problem
+- CI runner/toolchain issue
+
+Do not solve a later bucket until earlier buckets are reasonably ruled out.
+
+### 6.5 Release-Engineering Debugging Order
+For iOS delivery, debug in this order unless evidence clearly says otherwise:
+1. identifiers/config
+2. project generation
+3. archive
+4. signing assets
+5. profile installation
+6. export options
+7. upload
+8. Apple validation/content issues
+
+---
+
+## 7. Refactor Mode
+
+Refactoring must improve structure without changing intended behavior.
+
+### 7.1 Refactor Priorities
+- reduce responsibility overload
+- improve naming and boundaries
+- eliminate duplication
+- centralize repeated rules
+- make tests easier to write and reason about
+- improve observability or failure clarity when useful
+- preserve learned operational knowledge in docs/runbooks/this file
+
+### 7.2 Refactor Guardrails
+- preserve public contracts unless the task explicitly authorizes change
+- avoid mixing refactor + broad feature work in one pass
+- keep commits/change sets conceptually tight
+- update docs/tests when behavior or structure meaningfully changes
+
+---
+
+## 8. Feature Development Mode
+
+When building new functionality:
+
+1. Understand where the feature belongs in the architecture
+2. Reuse existing patterns unless they are clearly harmful
+3. Define contracts first:
+   - types
+   - schemas
+   - interfaces
+   - request/response shapes
+4. Separate:
+   - domain logic
+   - orchestration/application logic
+   - infrastructure adapters
+   - presentation/transport concerns
+5. Build the smallest complete slice that works end-to-end
+6. Add tests at the right level
+
+### 8.1 Prefer This Layering
+- **Domain**: rules, entities, invariants, scoring, transforms
+- **Application/Orchestration**: use cases, workflows, sequencing, coordination
+- **Infrastructure**: DB, network, queues, file system, LLM providers, third-party APIs, CI/release glue
+- **Interface**: HTTP handlers, CLI entry points, UI adapters, serializers
+
+---
+
+## 9. Testing Requirements
+
+Testing is not optional decoration.
+Choose the lightest test that proves the important thing, but do prove it.
+
+### 9.1 Test Strategy Hierarchy
+Prefer this mix when applicable:
+- **Unit tests** for pure domain logic and transforms
+- **Contract/schema tests** for boundaries and structured outputs
+- **Integration tests** for repositories, APIs, queues, and cross-module flows
+- **Characterization tests** before refactoring risky legacy behavior
+- **End-to-end tests** for business-critical user journeys
+- **Stage-based validation** for iOS delivery pipelines
+
+### 9.2 What to Cover
+Cover:
+- happy path
+- edge cases
+- expected failures
+- regressions for any significant bug fixed
+- important invariants and schema contracts
+
+### 9.3 Good Testing Habits
+- keep tests deterministic
+- use representative fixtures, not fantasy data when domain nuance matters
+- avoid brittle tests tied to irrelevant formatting
+- test observable behavior more than implementation trivia
+
+### 9.4 AI-System Testing
+For AI-assisted or LLM-dependent systems, also use:
+- prompt/version golden tests when appropriate
+- schema validation tests
+- fallback-path tests
+- timeout/retry/circuit-breaker tests
+- masked fixtures to avoid leaking secrets or unstable values
+
+### 9.5 iOS Pipeline Validation Rule
+For iOS CI, explicitly distinguish these validations:
+- project generation succeeded
+- archive succeeded
+- signing succeeded
+- profile install succeeded
+- export succeeded
+- upload succeeded
+- Apple validation succeeded
+
+Never summarize “pipeline works” unless the intended stage has passed.
+
+---
+
+## 10. Architecture Rules for AI + Agentic Systems
+
+Use these when the repository includes LLMs, tools, retrieval, or multi-agent flows.
+
+### 10.1 Deterministic Shells, Nondeterministic Cores
+Wrap model calls with deterministic infrastructure:
+- stable prompts
+- explicit schemas
+- bounded budgets
+- timeouts
+- retries with jitter
+- trace IDs
+- versioned configs
+
+### 10.2 Schema-First Outputs
+Every meaningful AI boundary should have an explicit contract.
+Prefer structured outputs that can be validated.
+If a freeform answer is required, still separate:
+- raw model output
+- parsed/validated structure
+- user-facing rendering
+
+### 10.3 Evidence-First Reasoning
+For systems that synthesize facts, analyses, or recommendations:
+- preserve provenance
+- keep citations/links/IDs where available
+- distinguish source facts from model inference
+- never silently upgrade weak evidence into strong claims
+
+### 10.4 Routing and Parallelism
+When using multiple agents/tools:
+- activate the fewest components needed
+- cap concurrency
+- use partial success patterns
+- prefer `allSettled`-style orchestration where sensible
+- isolate slow or failure-prone dependencies
+
+### 10.5 Cost and Latency Discipline
+Control:
+- token budgets
+- recursion depth
+- fan-out width
+- timeout ceilings
+- cache keys and lifetimes
+
+Do not build AI orchestration that is impossible to reason about operationally.
+
+---
+
+## 11. Reliability, Resilience, and Performance
+
+### 11.1 Required Reliability Patterns
+Use these when justified by the path’s criticality:
+- timeouts
+- cancellation/abort support
+- retries with backoff or jitter
+- circuit breakers
+- bulkheads
+- idempotency keys for retryable writes
+- graceful degradation for partial failure
+
+### 11.2 Concurrency Rules
+- prefer bounded concurrency
+- avoid unbounded parallel calls
+- protect shared resources
+- use queues/backpressure where bursts can overwhelm dependencies
+
+### 11.3 Performance Rules
+Optimize in this order:
+1. eliminate waste
+2. reduce unnecessary I/O
+3. cache stable expensive work
+4. simplify algorithms/data flow
+5. parallelize only when the workload and dependencies justify it
+
+### 11.4 Streaming and UX
+If output can stream, prefer fast first meaningful output over long silence.
+But do not stream misleading intermediate claims as if they were final.
+
+### 11.5 Release Pipeline Performance Rule
+For CI pipelines, optimize first for:
+1. stage clarity
+2. reproducibility
+3. diagnosability
+4. then runtime speed
+
+A 2-minute build with excellent diagnostics is better than a 90-second build that obscures the real failure.
+
+---
+
+## 12. Observability and Operational Discipline
+
+Every non-trivial production system should be diagnosable.
+
+### 12.1 Observability Defaults
+Prefer:
+- structured logs
+- request/trace IDs
+- meaningful error messages
+- timing/latency measurements
+- metrics for critical paths
+- enough context to reproduce failures without exposing secrets
+
+### 12.2 Log Rules
+Never log:
+- secrets
+- raw credentials
+- unnecessary PII
+- full tokens or keys
+
+When logging failures, include enough information to localize the issue:
+- subsystem
+- operation
+- identifiers safe to expose
+- retry count / timeout context
+
+### 12.3 Runbook Mindset
+If the task reveals a recurring operational trap, update docs/runbooks when appropriate.
+A strong repository teaches future sessions how not to repeat the same failure.
+
+### 12.4 iOS Release Runbook Rule
+When an iOS delivery issue is solved, document:
+- exact failing stage
+- root cause
+- what false leads were eliminated
+- final working approach
+- required secrets/artifacts
+- any Apple-specific caveats
+- what can be reused in the next app
+
+---
+
+## 13. Security and Data Safety
+
+Security is a default responsibility.
+
+### 13.1 Always Prefer
+- least-privilege access
+- parameterized queries
+- input validation and output encoding
+- secret management through environment/vault tooling
+- safe defaults in authz/authn flows
+- auditability for sensitive operations
+
+### 13.2 Never
+- hardcode secrets
+- print secrets into logs
+- trust unsanitized external input
+- weaken security controls to get tests passing without clearly flagging it
+
+### 13.3 Prompt/Tool Safety
+For AI systems using external content or tool results:
+- treat retrieved text as untrusted input
+- separate instructions from data
+- sanitize or constrain tool-fed context when needed
+- avoid allowing external content to redefine system intent
+
+### 13.4 Apple Signing Secret Safety
+For iOS release engineering:
+- separate API auth secrets from signing secrets
+- minimize cross-platform transformations of signing artifacts
+- prefer macOS-native creation/import for Apple-specific formats when feasible
+- rotate/recreate artifacts carefully, not casually
+- avoid repeated destructive changes unless the current artifact state is truly the problem
+
+---
+
+## 14. Documentation Rules
+
+Documentation should help the next engineer and the next Claude session.
+
+### 14.1 Keep Fresh
+Maintain or update when relevant:
+- `README.md`
+- architecture notes
+- ADRs
+- runbooks
+- setup/build/test instructions
+- prompt registries or model config docs
+- CI/release docs
+- Apple-signing notes where relevant
+
+### 14.2 Prefer Docs That Answer
+- what this subsystem does
+- where the key entry points are
+- what contracts exist
+- how to run and validate changes
+- what known risks or constraints matter
+
+### 14.3 End-of-Task Learning Loop
+At the end of meaningful work, if appropriate, suggest concise documentation or memory updates that would help future sessions avoid repeating discovery work.
+
+### 14.4 Windows + iOS Documentation Rule
+For this repo, documentation should explicitly distinguish:
+- steps possible from Windows
+- steps requiring GitHub macOS runners
+- steps requiring Apple portal/App Store Connect interaction
+- expected secrets/artifacts and their roles
+
+---
+
+## 15. How to Read and Modify a Codebase
+
+When entering unfamiliar code, follow this order:
+1. digest / synopsis docs
+2. root README and project docs
+3. entry points
+4. types/schemas/contracts
+5. tests
+6. implementation details
+7. configs and deployment/runtime assumptions
+
+For iOS release work, also inspect:
+8. project generation/config files (`project.yml`, XcodeGen files, plist definitions)
+9. GitHub workflows
+10. signing/setup scripts
+11. asset catalogs
+12. release notes/runbooks for current known-good paths
+
+---
+
+## 16. Preferred Implementation Patterns
+
+Reach for these patterns when they fit.
+
+### 16.1 Good Defaults
+- pure functions for transforms and business rules
+- dependency injection at boundaries
+- adapters for DB/API/tool providers
+- explicit schemas for inputs/outputs
+- repository/service split only when it clarifies responsibilities
+- composition over inheritance
+- small utility modules over sprawling helper dumps
+
+### 16.2 Helpful Patterns for TS/JS Codebases
+- runtime validation with Zod/Valibot/TypeBox or equivalent
+- `AbortController` for cancellation
+- bounded concurrency helpers
+- `Promise.allSettled` where partial completion is acceptable
+- typed config loading at startup
+
+### 16.3 Helpful Patterns for This Repo’s iOS + CI Work
+- script repeated setup steps instead of manual portal repetition
+- keep workflow stages explicit and named by responsibility
+- use environment variables and secrets deliberately, not ad hoc
+- validate generated files before the next stage consumes them
+- use Apple-native tooling on macOS runners for Apple-specific artifact handling when feasible
+- prefer one coherent signing strategy per pipeline phase
+
+### 16.4 Avoid
+- giant files with mixed concerns
+- hidden global state unless deliberately managed
+- magical side effects at import time
+- boolean-flag explosions when a strategy/config object would be clearer
+- adding abstraction layers with no immediate payoff
+- rebuilding signing architecture from scratch without first isolating the real failure layer
+
+---
+
+## 17. What a Strong Claude Code Instruction File Looks Like
+
+A strong `CLAUDE.md` should be:
+- specific enough to change behavior
+- concise enough to stay usable
+- grounded in recurring repository realities
+- explicit about platform constraints
+- structured around real workflows
+- updated after meaningful failures and successful resolutions
+
+This file therefore emphasizes:
+- evidence before assumption
+- baseline before automation
+- Windows-aware iOS delivery
+- stage-based debugging
+- operational memory for release engineering
+
+---
+
+## 18. Task Templates Claude Should Implicitly Follow
+
+### 18.1 For a Bug Fix
+- identify failing path
+- inspect contracts and recent assumptions
+- confirm root cause
+- implement smallest correct fix
+- add/update regression coverage
+- summarize risk and validation
+
+### 18.2 For a Refactor
+- identify design smell
+- preserve behavior
+- tighten boundaries/naming/contracts
+- keep change set focused
+- run/update relevant tests
+
+### 18.3 For a New Feature
+- locate architectural home
+- define contracts first
+- implement vertical slice
+- add observability where needed
+- test the important path
+- document meaningful behavior/config changes
+
+### 18.4 For an AI Workflow Change
+- identify affected prompts/tools/models/schemas
+- preserve deterministic wrappers
+- validate structure and fallback behavior
+- check cost/latency implications
+- maintain source/evidence handling
+
+### 18.5 For an iOS CI / Signing Change
+- define the exact target stage
+- inspect current workflow and signing mode
+- confirm bundle ID / app record / team assumptions
+- minimize moving parts
+- change one release layer at a time
+- validate the current stage from logs
+- do not declare end-to-end success early
+- document the final working path
+
+---
+
+## 19. Repository-Specific Lessons for Future iOS Work
+
+Use these lessons as standing defaults for this repo’s Apple-platform delivery work.
+
+### 19.1 Do Better Next Time
+Prefer this order:
+1. verify app identifiers, assets, and metadata first
+2. keep the first CI goal narrow
+3. avoid jumping directly into full TestFlight automation if archive/export is still unproven
+4. avoid mixing automatic and manual signing assumptions
+5. treat Apple content validation as a separate stage after upload is functioning
+
+### 19.2 Information the User Should Provide Early If Available
+If relevant, ask for or infer these early:
+- Windows vs macOS environment
+- whether any remote Mac exists
+- whether the app record already exists in App Store Connect
+- final bundle identifier
+- team ID
+- current signing strategy
+- exact goal for this session:
+  - compile only
+  - archive
+  - sign
+  - upload
+  - TestFlight installability
+  - App Store readiness
+
+### 19.3 Three Questions Claude Must Ask Internally
+1. **What is the fastest path to a working baseline?**
+2. **What assumptions am I making that are not yet verified?**
+3. **Am I solving the correct layer of the problem?**
+
+If those answers are weak, slow down and reduce scope.
+
+---
+
+## 20. Final Standing Rules
+
+1. Read before editing.
+2. Prefer evidence over guesswork.
+3. Keep changes small and coherent.
+4. Preserve architectural intent unless the task is to change it.
+5. Make hidden assumptions explicit in code, types, or docs.
+6. Test the important thing.
+7. Protect reliability, security, and maintainability.
+8. Respect the Windows-first reality of this repo’s iOS workflow.
+9. Treat iOS signing and TestFlight delivery as release engineering, not casual build config.
+10. Leave the repository clearer than you found it.
+11. **Before pushing any change to `main`: bump `CURRENT_PROJECT_VERSION` in `project.yml`.** Apple rejects uploads with a duplicate build number, and TestFlight will not surface the new build to testers if the version/build pair already exists. Bump the build number on every push. Bump `MARKETING_VERSION` when the user requests a user-visible version change.
+
+If you must trade off, favor:
+**correctness > clarity > maintainability > speed of implementation > cleverness**
