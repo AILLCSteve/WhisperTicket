@@ -5,6 +5,7 @@ struct LiveSessionView: View {
     @Environment(\.appServices) var services
     @State private var vm: LiveSessionViewModel?
     @State private var navigateToEditor: Ticket? = nil
+    @State private var createTicketError: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -88,6 +89,14 @@ struct LiveSessionView: View {
 
                     // Controls bar
                     VStack(spacing: 12) {
+                        if vm.isFinalizingTranscription {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("Processing speech…")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+
                         // Noise level indicator
                         if vm.isRecording {
                             HStack {
@@ -124,7 +133,7 @@ struct LiveSessionView: View {
                                 Label("Edit", systemImage: "pencil.circle.fill")
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(vm.draft.items.isEmpty)
+                            .disabled(vm.transcript.isEmpty && vm.draft.items.isEmpty)
                         }
                     }
                     .padding()
@@ -139,6 +148,14 @@ struct LiveSessionView: View {
                 }
                 .navigationDestination(item: $navigateToEditor) { ticket in
                     TicketEditorView(ticket: ticket)
+                }
+                .alert("Error", isPresented: Binding(
+                    get: { createTicketError != nil },
+                    set: { if !$0 { createTicketError = nil } }
+                )) {
+                    Button("OK") { createTicketError = nil }
+                } message: {
+                    Text(createTicketError ?? "")
                 }
             } else {
                 ProgressView("Setting up...")
@@ -157,8 +174,14 @@ struct LiveSessionView: View {
     }
 
     private func confirmAndNavigate(vm: LiveSessionViewModel) async {
-        let ticket = try? await services.repository.createTicket(from: vm.draft, serverId: "local_server")
-        navigateToEditor = ticket
+        do {
+            let ticket = try await services.repository.createTicket(
+                from: vm.draft, serverId: "local_server"
+            )
+            navigateToEditor = ticket
+        } catch {
+            createTicketError = "Could not create ticket: \(error.localizedDescription)"
+        }
     }
 }
 
