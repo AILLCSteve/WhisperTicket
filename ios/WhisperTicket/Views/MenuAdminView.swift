@@ -1,9 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MenuAdminView: View {
     @Environment(\.appServices) var services
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showImportPicker = false
+    @State private var isImporting = false
+    @State private var importResult: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -42,6 +46,12 @@ struct MenuAdminView: View {
                         description: Text("Tap Reload to load the demo menu, or use Import to add a menu from a PDF or image.")
                     )
                 }
+
+                if isImporting {
+                    ProgressView("Importing menu…")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
             }
             .navigationTitle("Menu")
             .toolbar {
@@ -58,6 +68,14 @@ struct MenuAdminView: View {
                         }
                     }
                 }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button {
+                        showImportPicker = true
+                    } label: {
+                        Label("Import Menu", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(isImporting)
+                }
             }
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -66,6 +84,39 @@ struct MenuAdminView: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .fileImporter(
+                isPresented: $showImportPicker,
+                allowedContentTypes: [.pdf, .image, .jpeg, .png],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    let fileType: MenuImportFileType = url.pathExtension.lowercased() == "pdf" ? .pdf : .image
+                    Task {
+                        isImporting = true
+                        let outcome = await services.menuImporter.importMenu(from: url, fileType: fileType)
+                        switch outcome {
+                        case .success(let menu):
+                            // Phase 2: save to menuStore and reload
+                            importResult = "Imported: \(menu.categories.count) categories, \(menu.categories.flatMap { $0.items }.count) items"
+                        case .failure(let message):
+                            importResult = message
+                        }
+                        isImporting = false
+                    }
+                case .failure(let error):
+                    errorMessage = error.localizedDescription
+                }
+            }
+            .alert("Import Result", isPresented: Binding(
+                get: { importResult != nil },
+                set: { if !$0 { importResult = nil } }
+            )) {
+                Button("OK") { importResult = nil }
+            } message: {
+                Text(importResult ?? "")
             }
         }
     }

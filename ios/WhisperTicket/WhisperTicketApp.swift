@@ -38,7 +38,8 @@ struct WhisperTicketApp: App {
                     menuStore: menuStore,
                     parser: parser,
                     upsellEngine: upsellEngine,
-                    repository: SwiftDataTicketRepository(modelContext: container.mainContext)
+                    repository: SwiftDataTicketRepository(modelContext: container.mainContext),
+                    menuImporter: StubMenuImportService()    // NEW
                 ))
                 .task {
                     do {
@@ -61,6 +62,7 @@ struct AppServices {
     let parser: OrderParserProtocol
     let upsellEngine: UpsellEngineProtocol
     let repository: TicketRepositoryProtocol
+    let menuImporter: MenuImportServiceProtocol    // NEW
 }
 
 // Placeholder used only as @Entry default — the real services are always injected
@@ -90,6 +92,7 @@ extension EnvironmentValues {
         menuStore: PlaceholderMenuStore(),
         parser: FuzzyMenuOrderParser(),
         upsellEngine: RuleBasedUpsellEngine(),
-        repository: PlaceholderTicketRepository()
+        repository: PlaceholderTicketRepository(),
+        menuImporter: StubMenuImportService()    // NEW
     )
 }

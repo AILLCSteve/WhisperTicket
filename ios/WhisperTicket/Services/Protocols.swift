@@ -59,6 +59,26 @@ protocol UpsellEngineProtocol {
     func suggestions(for draft: TicketDraft, menu: MenuV1) -> [UpsellSuggestionResult]
 }
 
+// MARK: - Menu Import
+
+// Menu import result — either a parsed menu or an error with raw response for debugging
+enum MenuImportResult {
+    case success(MenuV1)
+    case failure(String)      // human-readable error; preserve raw AI response for debugging
+}
+
+protocol MenuImportServiceProtocol {
+    /// Import a menu from a PDF or image file at the given URL.
+    /// Implementations should send the file to an AI service (e.g., OpenAI Vision)
+    /// and parse the response into MenuV1 format.
+    func importMenu(from fileURL: URL, fileType: MenuImportFileType) async -> MenuImportResult
+}
+
+enum MenuImportFileType: String {
+    case pdf
+    case image    // JPEG, PNG, HEIC
+}
+
 struct UpsellSuggestionResult: Identifiable {
     let id: String = UUID().uuidString
     let menuItem: MenuItem
