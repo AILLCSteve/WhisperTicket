@@ -46,7 +46,11 @@ final class TicketEditorViewModel {
 
     func removeItem(_ item: TicketItem, from seat: GuestSeat) async {
         seat.items.removeAll { $0.id == item.id }
-        await save()
+        do {
+            try await repository.deleteItem(item)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func updateItemNotes(_ item: TicketItem, notes: String) async {

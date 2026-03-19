@@ -70,6 +70,7 @@ private final class PlaceholderTicketRepository: TicketRepositoryProtocol {
     func fetchOpen() async throws -> [Ticket] { [] }
     func save(_ ticket: Ticket) async throws {}
     func delete(_ ticket: Ticket) async throws {}
+    func deleteItem(_ item: TicketItem) async throws {}
     func createTicket(from draft: TicketDraft, serverId: String) async throws -> Ticket {
         fatalError("AppServices not injected into environment")
     }
