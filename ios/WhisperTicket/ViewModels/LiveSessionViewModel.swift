@@ -15,6 +15,7 @@ final class LiveSessionViewModel {
     var detectedMacro: VoiceMacro? = nil
     var errorMessage: String? = nil
     var allergyItemsPendingConfirm: [DraftItem] = []
+    var isFinalizingTranscription = false   // shows "Processing…" indicator in UI
 
     private let audioCapture: AudioCaptureServiceProtocol
     private let transcriptionService: TranscriptionServiceProtocol
@@ -22,6 +23,8 @@ final class LiveSessionViewModel {
     private let menuStore: MenuStoreProtocol
     private let upsellEngine: UpsellEngineProtocol
     private var cancellables = Set<AnyCancellable>()
+    private var finalizationTimer: AnyCancellable?
+    private var transcriptionCancellable: AnyCancellable?  // separate from main cancellables
 
     let noiseWarningThreshold: Float = 0.75
 
@@ -46,15 +49,14 @@ final class LiveSessionViewModel {
             try audioCapture.startCapture()
             let audioPublisher = audioCapture.audioBufferPublisher()
             try transcriptionService.startTranscribing(audioPublisher: audioPublisher)
-            draft.consumedCursor = 0  // reset cursor for new recording session
+            draft.consumedCursor = 0
             isRecording = true
 
-            transcriptionService.transcriptionPublisher()
+            // Store transcription sub separately so stopRecording() doesn't kill it
+            transcriptionCancellable = transcriptionService.transcriptionPublisher()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] segment in self?.handleTranscriptionSegment(segment) }
-                .store(in: &cancellables)
 
-            // Noise level polling
             Timer.publish(every: 0.5, on: .main, in: .common)
                 .autoconnect()
                 .sink { [weak self] _ in self?.checkNoiseLevel() }
@@ -67,11 +69,17 @@ final class LiveSessionViewModel {
 
     func stopRecording() {
         audioCapture.stopCapture()
-        transcriptionService.stopTranscribing()
         isRecording = false
-        cancellables.removeAll()
+        isFinalizingTranscription = true
         noiseLevel = 0.0
         showNoisyEnvironmentWarning = false
+        cancellables.removeAll()   // kills noise timer etc., NOT transcription sub
+
+        // Safety timeout: if isFinal never arrives within 3s, finalize anyway
+        finalizationTimer = Timer.publish(every: 3.0, on: .main, in: .common)
+            .autoconnect()
+            .first()
+            .sink { [weak self] _ in self?.finalizeTranscription() }
     }
 
     func triggerRepeatBack() {
@@ -113,26 +121,38 @@ final class LiveSessionViewModel {
 
     private func handleTranscriptionSegment(_ segment: TranscriptionSegment) {
         transcript = segment.text
+        draft.rawTranscript = segment.text   // FIX: was never set before
 
-        // Always check for macros on every segment
         if let macro = parser.detectMacro(in: segment.text) {
             detectedMacro = macro
         }
 
-        // Only update the ticket draft on final segments to avoid cursor confusion:
-        // SFSpeechRecognizer replaces the entire transcript on each partial result,
-        // so advancing the cursor on partials causes missed/duplicate item parses.
-        guard segment.isFinal, let menu = menuStore.menu else { return }
+        guard let menu = menuStore.menu else {
+            // Menu not loaded: still update transcript so user can see it
+            if segment.isFinal { finalizeTranscription() }
+            return
+        }
 
         let updatedDraft = parser.parseDraft(transcript: segment.text, existingDraft: draft, menu: menu)
         draft = updatedDraft
+        draft.rawTranscript = segment.text   // keep in sync after parse
 
-        // Allergy guardrail: surface new allergy items needing confirmation
         let existingIds = Set(allergyItemsPendingConfirm.map { $0.id })
         let newAllergyItems = draft.items.filter { $0.hasAllergyFlag && !existingIds.contains($0.id) }
         allergyItemsPendingConfirm.append(contentsOf: newAllergyItems)
 
         refreshUpsells()
+
+        if segment.isFinal { finalizeTranscription() }
+    }
+
+    private func finalizeTranscription() {
+        finalizationTimer?.cancel()
+        finalizationTimer = nil
+        transcriptionCancellable?.cancel()
+        transcriptionCancellable = nil
+        transcriptionService.stopTranscribing()
+        isFinalizingTranscription = false
     }
 
     private func checkNoiseLevel() {
