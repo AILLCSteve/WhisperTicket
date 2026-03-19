@@ -39,7 +39,7 @@ struct MenuAdminView: View {
                     ContentUnavailableView(
                         "No Menu Loaded",
                         systemImage: "menucard",
-                        description: Text("Add MenuV1.sample.json to the app bundle.")
+                        description: Text("Tap Reload to load the demo menu, or use Import to add a menu from a PDF or image.")
                     )
                 }
             }
@@ -49,13 +49,20 @@ struct MenuAdminView: View {
                     Button("Reload") {
                         Task {
                             isLoading = true
-                            try? await services.menuStore.loadMenu()
+                            do {
+                                try await services.menuStore.loadMenu()
+                            } catch {
+                                errorMessage = error.localizedDescription
+                            }
                             isLoading = false
                         }
                     }
                 }
             }
-            .alert("Error", isPresented: .constant(errorMessage != nil)) {
+            .alert("Error", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
