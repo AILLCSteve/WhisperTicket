@@ -32,6 +32,12 @@ final class TicketEditorViewModel {
         await save()
     }
 
+    func closeTicket() async {
+        ticket.closedAt = Date()
+        ticket.status = TicketStatus.closed.rawValue
+        await save()
+    }
+
     func fireCourse(_ course: CourseFlag) async {
         coursePacingStates[course] = .fired
         ticket.coursePacingStates[course.rawValue] = CoursePacingState.fired.rawValue

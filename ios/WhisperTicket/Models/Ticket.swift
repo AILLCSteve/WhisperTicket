@@ -89,6 +89,11 @@ final class Ticket {
         return delivered.timeIntervalSince(sent)
     }
 
+    var totalTime: TimeInterval? {
+        guard let closed = closedAt else { return nil }
+        return closed.timeIntervalSince(openedAt)
+    }
+
     var allItems: [TicketItem] { guests.flatMap { $0.items } }
 }
 

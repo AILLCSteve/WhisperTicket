@@ -20,6 +20,12 @@ struct TicketEditorView: View {
                     if let timeToDeliver = ticket.timeToDeliver {
                         LabeledContent("Time to Deliver", value: formatInterval(timeToDeliver))
                     }
+                    if let totalTime = ticket.totalTime {
+                        LabeledContent("Total Time", value: formatInterval(totalTime))
+                    }
+                    if ticket.ticketStatus == .open || ticket.ticketStatus == .sent {
+                        ElapsedTimeLabel(since: ticket.openedAt)
+                    }
                 }
 
                 // Medium complexity: Course pacing
@@ -69,6 +75,10 @@ struct TicketEditorView: View {
 
                     Button("Mark Delivered") { Task { await vm.markDelivered() } }
                         .disabled(ticket.ticketStatus != .sent)
+
+                    Button("Close Ticket") { Task { await vm.closeTicket() } }
+                        .foregroundStyle(.red)
+                        .disabled(ticket.ticketStatus != .delivered)
                 }
 
                 // Medium complexity: seat map
@@ -175,6 +185,27 @@ struct TicketItemRow: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Elapsed Time Label
+
+struct ElapsedTimeLabel: View {
+    let since: Date
+    @State private var elapsed: TimeInterval = 0
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        LabeledContent("Elapsed") {
+            Text(formatInterval(elapsed))
+                .foregroundStyle(elapsed > 1200 ? .red : elapsed > 600 ? .orange : .primary)
+        }
+        .onAppear { elapsed = Date().timeIntervalSince(since) }
+        .onReceive(timer) { _ in elapsed = Date().timeIntervalSince(since) }
+    }
+
+    private func formatInterval(_ interval: TimeInterval) -> String {
+        "\(Int(interval / 60))m \(Int(interval) % 60)s"
     }
 }
 
