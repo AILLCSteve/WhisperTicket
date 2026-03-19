@@ -88,6 +88,7 @@ jobs:
       - name: Archive
         run: |
           set -o pipefail
+          # Use github.run_number as build number — auto-increments, never conflicts with Apple
           xcodebuild archive \
             -project WhisperTicket.xcodeproj \
             -scheme WhisperTicket \
@@ -98,6 +99,8 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+            MARKETING_VERSION="1.1.0" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             2>&1 | tee build.log
 
       # ── Export + Upload (main branch only) ────────────────────────────────

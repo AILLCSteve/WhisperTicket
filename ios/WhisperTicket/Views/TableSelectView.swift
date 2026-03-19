@@ -1,5 +1,11 @@
 import SwiftUI
 
+private var buildStamp: String {
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    let build   = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    return "v\(version) (\(build))"
+}
+
 struct TableSelectView: View {
     @Environment(\.appServices) var services
     @State private var vm: TableSelectViewModel?
@@ -65,6 +71,12 @@ struct TableSelectView: View {
                 }
 
                 Spacer()
+
+                // Build stamp — always visible so you know exactly what's on device
+                Text(buildStamp)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 8)
             }
             .navigationDestination(isPresented: $navigateToSession) {
                 if let tableNumber = vm?.tableNumber, !tableNumber.isEmpty {
