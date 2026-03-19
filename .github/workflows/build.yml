@@ -103,6 +103,15 @@ jobs:
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             2>&1 | tee build.log
 
+      # ── Verify version in archive ──────────────────────────────────────────
+      - name: Verify version in archive
+        run: |
+          PLIST="$RUNNER_TEMP/WhisperTicket.xcarchive/Products/Applications/WhisperTicket.app/Info.plist"
+          echo "=== CFBundleShortVersionString ==="
+          /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST"
+          echo "=== CFBundleVersion ==="
+          /usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST"
+
       # ── Export + Upload (main branch only) ────────────────────────────────
       - name: Export & Upload to TestFlight
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'

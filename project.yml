@@ -19,6 +19,8 @@ targets:
     info:
       path: ios/WhisperTicket/Info.plist
       properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleIconName: AppIcon
         UILaunchScreen:
           UIColorName: ""
