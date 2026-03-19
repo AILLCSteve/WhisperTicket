@@ -41,7 +41,12 @@ struct WhisperTicketApp: App {
                     repository: SwiftDataTicketRepository(modelContext: container.mainContext)
                 ))
                 .task {
-                    try? await menuStore.loadMenu()
+                    do {
+                        try await menuStore.loadMenu()
+                    } catch {
+                        print("⚠️ Menu load failed: \(error)")
+                        // Phase 2: propagate to UI via an @Observable app-level error state
+                    }
                 }
         }
     }

@@ -1,5 +1,7 @@
 import Foundation
+import Observation
 
+@Observable
 final class LocalBundleMenuStore: MenuStoreProtocol {
     private(set) var menu: MenuV1?
     private var itemIndex: [String: MenuItem] = [:]
@@ -11,8 +13,10 @@ final class LocalBundleMenuStore: MenuStoreProtocol {
         }
         let data = try Data(contentsOf: url)
         let loaded = try JSONDecoder().decode(MenuV1.self, from: data)
-        self.menu = loaded
-        buildIndex(from: loaded)
+        await MainActor.run {
+            self.menu = loaded
+            self.buildIndex(from: loaded)
+        }
     }
 
     func findBestMatches(text: String, maxResults: Int = 3) -> [(item: MenuItem, score: Double)] {
