@@ -62,14 +62,23 @@ final class SwiftDataTicketRepository: TicketRepositoryProtocol {
             // Unseated items go to seat 1
             let unseated = draft.items.filter { $0.seatNumber == nil }
             if !unseated.isEmpty {
-                let seat = GuestSeat(seatNumber: 1)
-                for draftItem in unseated {
-                    let item = buildTicketItem(from: draftItem)
-                    seat.items.append(item)
-                    modelContext.insert(item)
+                // Reuse seat 1 if it was already created; otherwise create it
+                if let existingSeat1 = ticket.guests.first(where: { $0.seatNumber == 1 }) {
+                    for draftItem in unseated {
+                        let item = buildTicketItem(from: draftItem)
+                        existingSeat1.items.append(item)
+                        modelContext.insert(item)
+                    }
+                } else {
+                    let seat = GuestSeat(seatNumber: 1)
+                    for draftItem in unseated {
+                        let item = buildTicketItem(from: draftItem)
+                        seat.items.append(item)
+                        modelContext.insert(item)
+                    }
+                    modelContext.insert(seat)
+                    ticket.guests.append(seat)
                 }
-                modelContext.insert(seat)
-                ticket.guests.append(seat)
             }
         }
 
