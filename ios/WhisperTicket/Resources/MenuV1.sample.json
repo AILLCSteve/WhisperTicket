@@ -1,5 +1,5 @@
 {
-  "restaurant_id": "demo_restaurant",
+  "restaurant_id": "applebees_demo",
   "version": 1,
   "currency": "USD",
   "categories": [
@@ -8,21 +8,53 @@
       "name": "Appetizers",
       "items": [
         {
-          "id": "item_mozz",
-          "name": "Mozzarella Sticks",
-          "price": 9.99,
-          "description": "Served with marinara",
-          "tags": ["fried", "vegetarian"],
+          "id": "item_boneless_wings",
+          "name": "Boneless Wings",
+          "price": 13.99,
+          "description": "Crispy all-white meat chicken tossed in your choice of sauce",
+          "tags": ["fried", "shareable", "popular"],
           "modifier_groups": [
             {
-              "id": "mg_sauce",
-              "name": "Sauce Choice",
+              "id": "mg_wing_sauce",
+              "name": "Sauce",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_honey_bbq", "name": "Honey BBQ", "price_delta": 0.0},
+                {"id": "m_buffalo", "name": "Classic Buffalo", "price_delta": 0.0},
+                {"id": "m_sweet_chili", "name": "Sweet Asian Chile", "price_delta": 0.0},
+                {"id": "m_garlic_parmesan", "name": "Garlic Parmesan", "price_delta": 0.0}
+              ]
+            },
+            {
+              "id": "mg_wing_dip",
+              "name": "Dipping Sauce",
               "required": false,
               "max_select": 1,
               "modifiers": [
-                {"id": "m_ranch", "name": "Ranch", "price_delta": 0.0},
+                {"id": "m_ranch_dip", "name": "Ranch", "price_delta": 0.0},
+                {"id": "m_blue_cheese_dip", "name": "Blue Cheese", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_draft_beer", "reason": "Great with wings"}],
+          "kitchen_note_template": "Sauce: [sauce]"
+        },
+        {
+          "id": "item_mozz_sticks",
+          "name": "Mozzarella Sticks",
+          "price": 11.99,
+          "description": "Golden-fried, served with marinara",
+          "tags": ["fried", "vegetarian", "shareable"],
+          "modifier_groups": [
+            {
+              "id": "mg_mozz_sauce",
+              "name": "Sauce",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
                 {"id": "m_marinara", "name": "Marinara", "price_delta": 0.0},
-                {"id": "m_honey_mustard", "name": "Honey Mustard", "price_delta": 0.0}
+                {"id": "m_ranch_mozz", "name": "Ranch", "price_delta": 0.0}
               ]
             }
           ],
@@ -30,116 +62,507 @@
           "kitchen_note_template": ""
         },
         {
-          "id": "item_caesar",
-          "name": "Caesar Salad",
-          "price": 11.99,
-          "description": "Romaine, croutons, parmesan",
-          "tags": ["salad", "vegetarian"],
+          "id": "item_spinach_dip",
+          "name": "Spinach & Artichoke Dip",
+          "price": 12.99,
+          "description": "Warm creamy dip with tortilla chips and salsa",
+          "tags": ["vegetarian", "shareable"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_wonton_tacos",
+          "name": "Wonton Tacos",
+          "price": 13.49,
+          "description": "Crispy wonton shells with seasoned chicken, coleslaw, Asian glaze",
+          "tags": ["fried", "shareable"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_nachos",
+          "name": "Classic Nachos",
+          "price": 13.99,
+          "description": "Tortilla chips, cheese, jalapeños, pico, sour cream, guacamole",
+          "tags": ["shareable", "vegetarian"],
           "modifier_groups": [
             {
-              "id": "mg_caesar_mods",
-              "name": "Modifications",
+              "id": "mg_nacho_protein",
+              "name": "Add Protein",
               "required": false,
-              "max_select": 3,
+              "max_select": 1,
               "modifiers": [
-                {"id": "m_no_croutons", "name": "No Croutons", "price_delta": 0.0},
-                {"id": "m_dressing_side", "name": "Dressing on Side", "price_delta": 0.0},
-                {"id": "m_add_chicken", "name": "Add Chicken", "price_delta": 3.0}
+                {"id": "m_nacho_chicken", "name": "Grilled Chicken", "price_delta": 2.99},
+                {"id": "m_nacho_beef", "name": "Seasoned Beef", "price_delta": 2.99}
               ]
             }
           ],
           "upsell_links": [],
-          "kitchen_note_template": "GF? No croutons."
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_brew_pretzels",
+          "name": "Brew Pub Pretzels & Beer Cheese",
+          "price": 11.99,
+          "description": "Soft warm pretzels with beer cheese dipping sauce",
+          "tags": ["vegetarian", "shareable"],
+          "modifier_groups": [],
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_draft_beer", "reason": "Perfect pairing"}],
+          "kitchen_note_template": ""
         }
       ]
     },
     {
-      "id": "cat_entrees",
-      "name": "Entrees",
+      "id": "cat_salads",
+      "name": "Soups & Salads",
       "items": [
         {
-          "id": "item_burger",
-          "name": "Classic Burger",
-          "price": 14.99,
-          "description": "8oz beef patty, lettuce, tomato, onion",
-          "tags": ["beef", "entree"],
+          "id": "item_house_salad",
+          "name": "Garden Salad",
+          "price": 9.99,
+          "description": "Mixed greens, tomatoes, cucumbers, croutons",
+          "tags": ["vegetarian", "salad", "side"],
           "modifier_groups": [
             {
-              "id": "mg_temp",
+              "id": "mg_salad_dressing",
+              "name": "Dressing",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_ranch", "name": "Ranch", "price_delta": 0.0},
+                {"id": "m_caesar_dress", "name": "Caesar", "price_delta": 0.0},
+                {"id": "m_balsamic", "name": "Balsamic Vinaigrette", "price_delta": 0.0},
+                {"id": "m_honey_mustard_dress", "name": "Honey Mustard", "price_delta": 0.0},
+                {"id": "m_blue_cheese_dress", "name": "Blue Cheese", "price_delta": 0.0},
+                {"id": "m_dressing_side", "name": "On the Side", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": "Dressing: [choice]"
+        },
+        {
+          "id": "item_caesar_salad",
+          "name": "Caesar Salad",
+          "price": 11.99,
+          "description": "Romaine, parmesan, croutons, caesar dressing",
+          "tags": ["salad"],
+          "modifier_groups": [
+            {
+              "id": "mg_caesar_protein",
+              "name": "Add Protein",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_grilled_chicken_caesar", "name": "Grilled Chicken", "price_delta": 3.99},
+                {"id": "m_shrimp_caesar", "name": "Grilled Shrimp", "price_delta": 4.99}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_oriental_salad",
+          "name": "Oriental Chicken Salad",
+          "price": 14.99,
+          "description": "Crispy chicken over mixed greens, almonds, noodles, Asian dressing",
+          "tags": ["salad", "popular"],
+          "modifier_groups": [
+            {
+              "id": "mg_oriental_chicken",
+              "name": "Chicken Style",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_crispy_os", "name": "Crispy", "price_delta": 0.0},
+                {"id": "m_grilled_os", "name": "Grilled", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_chicken_tortilla_soup",
+          "name": "Chicken Tortilla Soup",
+          "price": 7.99,
+          "description": "Hearty chicken, tomatoes, chilies, topped with tortilla strips",
+          "tags": ["soup", "hot"],
+          "modifier_groups": [
+            {
+              "id": "mg_soup_size",
+              "name": "Size",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_soup_cup", "name": "Cup", "price_delta": 0.0},
+                {"id": "m_soup_bowl", "name": "Bowl", "price_delta": 2.00}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_french_onion_soup",
+          "name": "French Onion Soup",
+          "price": 7.99,
+          "description": "Caramelized onion broth, gruyere crouton",
+          "tags": ["soup", "hot"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        }
+      ]
+    },
+    {
+      "id": "cat_burgers",
+      "name": "Burgers & Sandwiches",
+      "items": [
+        {
+          "id": "item_classic_burger",
+          "name": "Classic Burger",
+          "price": 13.99,
+          "description": "Beef patty, lettuce, tomato, onion, pickles, house sauce",
+          "tags": ["entree", "burger", "popular"],
+          "modifier_groups": [
+            {
+              "id": "mg_burger_temp",
               "name": "Temperature",
               "required": true,
               "max_select": 1,
               "modifiers": [
-                {"id": "m_rare", "name": "Rare", "price_delta": 0.0},
-                {"id": "m_med_rare", "name": "Medium Rare", "price_delta": 0.0},
+                {"id": "m_medium_rare", "name": "Medium Rare", "price_delta": 0.0},
                 {"id": "m_medium", "name": "Medium", "price_delta": 0.0},
-                {"id": "m_med_well", "name": "Medium Well", "price_delta": 0.0},
-                {"id": "m_well", "name": "Well Done", "price_delta": 0.0}
+                {"id": "m_medium_well", "name": "Medium Well", "price_delta": 0.0},
+                {"id": "m_well_done_b", "name": "Well Done", "price_delta": 0.0}
               ]
             },
             {
-              "id": "mg_burger_mods",
-              "name": "Modifications",
+              "id": "mg_burger_cheese",
+              "name": "Cheese",
               "required": false,
-              "max_select": 5,
+              "max_select": 1,
               "modifiers": [
-                {"id": "m_no_onion", "name": "No Onion", "price_delta": 0.0},
-                {"id": "m_no_tomato", "name": "No Tomato", "price_delta": 0.0},
-                {"id": "m_add_bacon", "name": "Add Bacon", "price_delta": 2.0},
-                {"id": "m_add_cheese", "name": "Add Cheese", "price_delta": 1.0}
+                {"id": "m_american", "name": "American", "price_delta": 0.0},
+                {"id": "m_cheddar", "name": "Cheddar", "price_delta": 0.0},
+                {"id": "m_swiss", "name": "Swiss", "price_delta": 0.0},
+                {"id": "m_no_cheese", "name": "No Cheese", "price_delta": 0.0}
+              ]
+            },
+            {
+              "id": "mg_burger_bun",
+              "name": "Bun",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_regular_bun", "name": "Regular Bun", "price_delta": 0.0},
+                {"id": "m_lettuce_wrap", "name": "Lettuce Wrap", "price_delta": 0.0},
+                {"id": "m_gf_bun", "name": "Gluten-Free Bun", "price_delta": 1.50}
               ]
             }
           ],
-          "upsell_links": [
-            {"type": "suggest", "target_item_id": "item_fries", "reason": "Pairs great with burger"}
-          ],
-          "kitchen_note_template": "Temp: ___. Mods: ___."
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_fries", "reason": "Add fries?"}],
+          "kitchen_note_template": "Temp: [temp] | Cheese: [cheese]"
         },
         {
-          "id": "item_salmon",
-          "name": "Grilled Salmon",
-          "price": 22.99,
-          "description": "Atlantic salmon, seasonal vegetables",
-          "tags": ["fish", "entree", "gluten_free"],
+          "id": "item_whiskey_bacon_burger",
+          "name": "Whiskey Bacon Burger",
+          "price": 15.99,
+          "description": "Beef patty, whiskey glaze, crispy bacon, cheddar, fried onion strings",
+          "tags": ["entree", "burger", "popular"],
           "modifier_groups": [
             {
-              "id": "mg_salmon_mods",
-              "name": "Modifications",
-              "required": false,
-              "max_select": 3,
-              "modifiers": [
-                {"id": "m_no_butter", "name": "No Butter", "price_delta": 0.0},
-                {"id": "m_extra_veg", "name": "Extra Vegetables", "price_delta": 2.0},
-                {"id": "m_sauce_side", "name": "Sauce on Side", "price_delta": 0.0}
-              ]
-            }
-          ],
-          "upsell_links": [],
-          "kitchen_note_template": "Allergy? GF by default."
-        },
-        {
-          "id": "item_steak",
-          "name": "Ribeye Steak",
-          "price": 34.99,
-          "description": "12oz ribeye, choice of side",
-          "tags": ["beef", "entree", "premium"],
-          "modifier_groups": [
-            {
-              "id": "mg_steak_temp",
+              "id": "mg_wbb_temp",
               "name": "Temperature",
               "required": true,
               "max_select": 1,
               "modifiers": [
-                {"id": "m_steak_rare", "name": "Rare", "price_delta": 0.0},
-                {"id": "m_steak_med_rare", "name": "Medium Rare", "price_delta": 0.0},
-                {"id": "m_steak_medium", "name": "Medium", "price_delta": 0.0},
-                {"id": "m_steak_med_well", "name": "Medium Well", "price_delta": 0.0},
-                {"id": "m_steak_well", "name": "Well Done", "price_delta": 0.0}
+                {"id": "m_wbb_mr", "name": "Medium Rare", "price_delta": 0.0},
+                {"id": "m_wbb_m", "name": "Medium", "price_delta": 0.0},
+                {"id": "m_wbb_mw", "name": "Medium Well", "price_delta": 0.0},
+                {"id": "m_wbb_wd", "name": "Well Done", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_draft_beer", "reason": "Pairs great"}],
+          "kitchen_note_template": "Temp: [temp]"
+        },
+        {
+          "id": "item_chicken_sandwich",
+          "name": "Crispy Chicken Sandwich",
+          "price": 13.99,
+          "description": "Crispy chicken breast, pickles, lettuce, tomato, mayo on brioche",
+          "tags": ["entree", "chicken", "sandwich"],
+          "modifier_groups": [
+            {
+              "id": "mg_cs_style",
+              "name": "Style",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_cs_crispy", "name": "Crispy", "price_delta": 0.0},
+                {"id": "m_cs_grilled", "name": "Grilled", "price_delta": 0.0},
+                {"id": "m_cs_buffalo", "name": "Buffalo Crispy", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_fries", "reason": "Add fries?"}],
+          "kitchen_note_template": ""
+        }
+      ]
+    },
+    {
+      "id": "cat_chicken",
+      "name": "Chicken & Seafood",
+      "items": [
+        {
+          "id": "item_chicken_tenders",
+          "name": "Chicken Tenders Platter",
+          "price": 14.99,
+          "description": "Hand-battered tenders, choice of sauce, fries, coleslaw",
+          "tags": ["entree", "chicken", "popular"],
+          "modifier_groups": [
+            {
+              "id": "mg_ct_sauce",
+              "name": "Sauce",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_ct_honey_bbq", "name": "Honey BBQ", "price_delta": 0.0},
+                {"id": "m_ct_buffalo", "name": "Buffalo", "price_delta": 0.0},
+                {"id": "m_ct_ranch", "name": "Ranch", "price_delta": 0.0},
+                {"id": "m_ct_honey_mustard", "name": "Honey Mustard", "price_delta": 0.0}
               ]
             }
           ],
           "upsell_links": [],
-          "kitchen_note_template": "Temp: ___."
+          "kitchen_note_template": "Sauce: [choice]"
+        },
+        {
+          "id": "item_double_crunch_shrimp",
+          "name": "Double Crunch Shrimp",
+          "price": 15.99,
+          "description": "Extra crispy coated shrimp, cocktail and tartar sauce",
+          "tags": ["entree", "seafood", "fried"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_shrimp_sirloin",
+          "name": "Shrimp 'N Parmesan Sirloin",
+          "price": 22.99,
+          "description": "6oz top sirloin topped with garlic parmesan shrimp",
+          "tags": ["entree", "steak", "seafood"],
+          "modifier_groups": [
+            {
+              "id": "mg_ss_temp",
+              "name": "Steak Temperature",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_ss_rare", "name": "Rare", "price_delta": 0.0},
+                {"id": "m_ss_mr", "name": "Medium Rare", "price_delta": 0.0},
+                {"id": "m_ss_m", "name": "Medium", "price_delta": 0.0},
+                {"id": "m_ss_mw", "name": "Medium Well", "price_delta": 0.0},
+                {"id": "m_ss_wd", "name": "Well Done", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": "Steak temp: [temp]"
+        }
+      ]
+    },
+    {
+      "id": "cat_riblets",
+      "name": "Riblets & Ribs",
+      "items": [
+        {
+          "id": "item_riblets",
+          "name": "Classic Riblets",
+          "price": 17.99,
+          "description": "Tender riblets glazed in your choice of sauce, fries and coleslaw",
+          "tags": ["entree", "popular"],
+          "modifier_groups": [
+            {
+              "id": "mg_rib_sauce",
+              "name": "Sauce",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_rib_honey_bbq", "name": "Honey BBQ", "price_delta": 0.0},
+                {"id": "m_rib_classic_bbq", "name": "Classic BBQ", "price_delta": 0.0},
+                {"id": "m_rib_double_glaze", "name": "Double Glazed", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_draft_beer", "reason": "Ribs and beer"}],
+          "kitchen_note_template": "Sauce: [choice]"
+        },
+        {
+          "id": "item_half_rack",
+          "name": "Half Rack Baby Back Ribs",
+          "price": 22.99,
+          "description": "Slow-cooked baby back ribs, choice of sauce, two sides",
+          "tags": ["entree", "popular"],
+          "modifier_groups": [
+            {
+              "id": "mg_hr_sauce",
+              "name": "Sauce",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_hr_honey_bbq", "name": "Honey BBQ", "price_delta": 0.0},
+                {"id": "m_hr_classic_bbq", "name": "Classic BBQ", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": "Sauce: [choice]"
+        }
+      ]
+    },
+    {
+      "id": "cat_pasta",
+      "name": "Pasta",
+      "items": [
+        {
+          "id": "item_three_cheese_penne",
+          "name": "Three Cheese Chicken Penne",
+          "price": 15.99,
+          "description": "Penne pasta, grilled chicken, three-cheese blend, marinara",
+          "tags": ["entree", "pasta"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_cajun_shrimp_pasta",
+          "name": "Cajun Shrimp Pasta",
+          "price": 16.99,
+          "description": "Penne, Cajun-spiced shrimp, tomatoes, peppers, cream sauce",
+          "tags": ["entree", "pasta", "seafood", "spicy"],
+          "modifier_groups": [
+            {
+              "id": "mg_csp_spice",
+              "name": "Spice Level",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_csp_regular", "name": "Regular", "price_delta": 0.0},
+                {"id": "m_csp_mild", "name": "Mild", "price_delta": 0.0},
+                {"id": "m_csp_extra", "name": "Extra Spicy", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": "Spice: [level]"
+        }
+      ]
+    },
+    {
+      "id": "cat_steaks",
+      "name": "Steaks",
+      "items": [
+        {
+          "id": "item_sirloin_6oz",
+          "name": "6oz Top Sirloin",
+          "price": 17.99,
+          "description": "USDA Select hand-cut sirloin, two sides",
+          "tags": ["entree", "steak"],
+          "modifier_groups": [
+            {
+              "id": "mg_sirloin_temp",
+              "name": "Temperature",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_sirl_rare", "name": "Rare", "price_delta": 0.0},
+                {"id": "m_sirl_mr", "name": "Medium Rare", "price_delta": 0.0},
+                {"id": "m_sirl_m", "name": "Medium", "price_delta": 0.0},
+                {"id": "m_sirl_mw", "name": "Medium Well", "price_delta": 0.0},
+                {"id": "m_sirl_wd", "name": "Well Done", "price_delta": 0.0}
+              ]
+            },
+            {
+              "id": "mg_sirloin_side",
+              "name": "Side",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_steak_fries", "name": "French Fries", "price_delta": 0.0},
+                {"id": "m_steak_mashed", "name": "Mashed Potatoes", "price_delta": 0.0},
+                {"id": "m_steak_broccoli", "name": "Steamed Broccoli", "price_delta": 0.0},
+                {"id": "m_steak_salad", "name": "Side Salad", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_cabernet", "reason": "Great with steak"}],
+          "kitchen_note_template": "Temp: [temp]"
+        },
+        {
+          "id": "item_bourbon_steak",
+          "name": "Bourbon Street Steak",
+          "price": 22.99,
+          "description": "8oz sirloin, sauteed mushrooms, onions, Bourbon glaze, two sides",
+          "tags": ["entree", "steak", "popular"],
+          "modifier_groups": [
+            {
+              "id": "mg_bst_temp",
+              "name": "Temperature",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_bst_rare", "name": "Rare", "price_delta": 0.0},
+                {"id": "m_bst_mr", "name": "Medium Rare", "price_delta": 0.0},
+                {"id": "m_bst_m", "name": "Medium", "price_delta": 0.0},
+                {"id": "m_bst_mw", "name": "Medium Well", "price_delta": 0.0},
+                {"id": "m_bst_wd", "name": "Well Done", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_cabernet", "reason": "Pairs with steak"}],
+          "kitchen_note_template": "Temp: [temp]"
+        },
+        {
+          "id": "item_filet_medallions",
+          "name": "Filet Medallions",
+          "price": 26.99,
+          "description": "Three beef tenderloin medallions, choice of sauce, two sides",
+          "tags": ["entree", "steak", "premium"],
+          "modifier_groups": [
+            {
+              "id": "mg_filet_temp",
+              "name": "Temperature",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_filet_rare", "name": "Rare", "price_delta": 0.0},
+                {"id": "m_filet_mr", "name": "Medium Rare", "price_delta": 0.0},
+                {"id": "m_filet_m", "name": "Medium", "price_delta": 0.0},
+                {"id": "m_filet_mw", "name": "Medium Well", "price_delta": 0.0},
+                {"id": "m_filet_wd", "name": "Well Done", "price_delta": 0.0}
+              ]
+            },
+            {
+              "id": "mg_filet_sauce",
+              "name": "Sauce",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_filet_peppercorn", "name": "Peppercorn", "price_delta": 0.0},
+                {"id": "m_filet_mushroom", "name": "Mushroom", "price_delta": 0.0},
+                {"id": "m_filet_bleu", "name": "Bleu Cheese Crust", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [{"type": "suggest", "target_item_id": "item_cabernet", "reason": "Perfect with filet"}],
+          "kitchen_note_template": "Temp: [temp] | Sauce: [sauce]"
         }
       ]
     },
@@ -151,20 +574,9 @@
           "id": "item_fries",
           "name": "French Fries",
           "price": 4.99,
-          "description": "Crispy golden fries",
-          "tags": ["fried", "vegetarian", "side"],
-          "modifier_groups": [
-            {
-              "id": "mg_fries_mods",
-              "name": "Modifications",
-              "required": false,
-              "max_select": 2,
-              "modifiers": [
-                {"id": "m_extra_crispy", "name": "Extra Crispy", "price_delta": 0.0},
-                {"id": "m_seasoned", "name": "Seasoned", "price_delta": 0.0}
-              ]
-            }
-          ],
+          "description": "Seasoned crispy fries",
+          "tags": ["side", "vegetarian"],
+          "modifier_groups": [],
           "upsell_links": [],
           "kitchen_note_template": ""
         },
@@ -172,9 +584,100 @@
           "id": "item_side_salad",
           "name": "Side Salad",
           "price": 5.99,
-          "description": "Mixed greens, house dressing",
-          "tags": ["salad", "vegetarian", "side"],
+          "description": "Mixed greens, tomato, croutons, choice of dressing",
+          "tags": ["side", "vegetarian", "salad"],
+          "modifier_groups": [
+            {
+              "id": "mg_ss_dressing",
+              "name": "Dressing",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_ss_ranch", "name": "Ranch", "price_delta": 0.0},
+                {"id": "m_ss_caesar", "name": "Caesar", "price_delta": 0.0},
+                {"id": "m_ss_balsamic", "name": "Balsamic", "price_delta": 0.0},
+                {"id": "m_ss_hm", "name": "Honey Mustard", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": "Dressing: [choice]"
+        },
+        {
+          "id": "item_mashed_potatoes",
+          "name": "Mashed Potatoes",
+          "price": 4.99,
+          "description": "Creamy whipped potatoes with butter",
+          "tags": ["side", "vegetarian"],
           "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_steamed_broccoli",
+          "name": "Steamed Broccoli",
+          "price": 4.49,
+          "description": "Fresh steamed broccoli with butter",
+          "tags": ["side", "vegetarian", "healthy", "gluten_free"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_coleslaw",
+          "name": "Coleslaw",
+          "price": 3.99,
+          "description": "Creamy house coleslaw",
+          "tags": ["side", "vegetarian"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        }
+      ]
+    },
+    {
+      "id": "cat_desserts",
+      "name": "Desserts",
+      "items": [
+        {
+          "id": "item_brownie",
+          "name": "Blue Ribbon Brownie",
+          "price": 8.99,
+          "description": "Warm chocolate brownie, vanilla ice cream, caramel drizzle",
+          "tags": ["dessert", "popular", "vegetarian"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_triple_choc_meltdown",
+          "name": "Triple Chocolate Meltdown",
+          "price": 8.99,
+          "description": "Warm chocolate cake, molten center, vanilla ice cream",
+          "tags": ["dessert", "popular", "vegetarian"],
+          "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": "FIRE LAST - serve immediately"
+        },
+        {
+          "id": "item_cheesecake",
+          "name": "New York Cheesecake",
+          "price": 7.99,
+          "description": "Classic cheesecake with strawberry topping",
+          "tags": ["dessert", "vegetarian"],
+          "modifier_groups": [
+            {
+              "id": "mg_cc_topping",
+              "name": "Topping",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_cc_strawberry", "name": "Strawberry", "price_delta": 0.0},
+                {"id": "m_cc_caramel", "name": "Caramel", "price_delta": 0.0},
+                {"id": "m_cc_plain", "name": "Plain", "price_delta": 0.0}
+              ]
+            }
+          ],
           "upsell_links": [],
           "kitchen_note_template": ""
         }
@@ -185,30 +688,25 @@
       "name": "Beverages",
       "items": [
         {
-          "id": "item_coke",
-          "name": "Coca-Cola",
-          "price": 2.99,
-          "description": "Fountain soda",
-          "tags": ["soft_drink", "beverage"],
-          "modifier_groups": [],
-          "upsell_links": [],
-          "kitchen_note_template": ""
-        },
-        {
-          "id": "item_water",
-          "name": "Water",
-          "price": 0.0,
-          "description": "Still or sparkling",
-          "tags": ["beverage", "soft_drink"],
+          "id": "item_soda",
+          "name": "Soft Drink",
+          "price": 3.49,
+          "description": "Pepsi, Diet Pepsi, Sierra Mist, Dr. Pepper, Lemonade, Iced Tea - free refills",
+          "tags": ["beverage", "soft_drink", "non_alcoholic"],
           "modifier_groups": [
             {
-              "id": "mg_water_type",
+              "id": "mg_soda_type",
               "name": "Type",
-              "required": false,
+              "required": true,
               "max_select": 1,
               "modifiers": [
-                {"id": "m_still", "name": "Still", "price_delta": 0.0},
-                {"id": "m_sparkling", "name": "Sparkling", "price_delta": 1.0}
+                {"id": "m_pepsi", "name": "Pepsi", "price_delta": 0.0},
+                {"id": "m_diet_pepsi", "name": "Diet Pepsi", "price_delta": 0.0},
+                {"id": "m_sierra_mist", "name": "Sierra Mist", "price_delta": 0.0},
+                {"id": "m_dr_pepper", "name": "Dr. Pepper", "price_delta": 0.0},
+                {"id": "m_lemonade", "name": "Lemonade", "price_delta": 0.0},
+                {"id": "m_iced_tea", "name": "Iced Tea", "price_delta": 0.0},
+                {"id": "m_unsweet_tea", "name": "Unsweet Tea", "price_delta": 0.0}
               ]
             }
           ],
@@ -216,12 +714,130 @@
           "kitchen_note_template": ""
         },
         {
-          "id": "item_ipa",
-          "name": "IPA Draft Beer",
-          "price": 7.99,
-          "description": "Local craft IPA on draft",
-          "tags": ["beer", "alcohol", "beverage", "signature_cocktail"],
+          "id": "item_water",
+          "name": "Water",
+          "price": 0.00,
+          "description": "Still water",
+          "tags": ["beverage", "non_alcoholic", "water"],
+          "modifier_groups": [
+            {
+              "id": "mg_water_mod",
+              "name": "Style",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_water_ice", "name": "With Ice", "price_delta": 0.0},
+                {"id": "m_water_no_ice", "name": "No Ice", "price_delta": 0.0},
+                {"id": "m_water_lemon", "name": "With Lemon", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_draft_beer",
+          "name": "Draft Beer",
+          "price": 6.99,
+          "description": "Ask your server for today's draft selections",
+          "tags": ["beverage", "beer", "alcoholic"],
+          "modifier_groups": [
+            {
+              "id": "mg_beer_size",
+              "name": "Size",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_beer_pint", "name": "Pint", "price_delta": 0.0},
+                {"id": "m_beer_pitcher", "name": "Pitcher", "price_delta": 8.00}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_cabernet",
+          "name": "Cabernet Sauvignon",
+          "price": 8.99,
+          "description": "House cabernet",
+          "tags": ["beverage", "wine", "alcoholic"],
+          "modifier_groups": [
+            {
+              "id": "mg_wine_size",
+              "name": "Size",
+              "required": true,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_wine_glass", "name": "Glass", "price_delta": 0.0},
+                {"id": "m_wine_bottle", "name": "Bottle", "price_delta": 18.00}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_margarita",
+          "name": "Neighborhood Margarita",
+          "price": 9.99,
+          "description": "Tequila, triple sec, lime juice",
+          "tags": ["beverage", "cocktail", "alcoholic", "popular"],
+          "modifier_groups": [
+            {
+              "id": "mg_marg_style",
+              "name": "Style",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_marg_rocks", "name": "On the Rocks", "price_delta": 0.0},
+                {"id": "m_marg_frozen", "name": "Frozen", "price_delta": 0.0},
+                {"id": "m_marg_no_salt", "name": "No Salt Rim", "price_delta": 0.0}
+              ]
+            },
+            {
+              "id": "mg_marg_flavor",
+              "name": "Flavor",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_marg_lime", "name": "Lime", "price_delta": 0.0},
+                {"id": "m_marg_strawberry", "name": "Strawberry", "price_delta": 0.0},
+                {"id": "m_marg_mango", "name": "Mango", "price_delta": 0.0}
+              ]
+            }
+          ],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_long_island",
+          "name": "Long Island Iced Tea",
+          "price": 10.99,
+          "description": "Five spirits, sweet and sour, Pepsi",
+          "tags": ["beverage", "cocktail", "alcoholic"],
           "modifier_groups": [],
+          "upsell_links": [],
+          "kitchen_note_template": ""
+        },
+        {
+          "id": "item_coffee",
+          "name": "Coffee",
+          "price": 3.49,
+          "description": "Fresh brewed, free refills",
+          "tags": ["beverage", "hot", "non_alcoholic"],
+          "modifier_groups": [
+            {
+              "id": "mg_coffee_mod",
+              "name": "Style",
+              "required": false,
+              "max_select": 1,
+              "modifiers": [
+                {"id": "m_coffee_regular", "name": "Regular", "price_delta": 0.0},
+                {"id": "m_coffee_decaf", "name": "Decaf", "price_delta": 0.0}
+              ]
+            }
+          ],
           "upsell_links": [],
           "kitchen_note_template": ""
         }
@@ -232,14 +848,28 @@
     {
       "id": "rule_drink_if_none",
       "if": {"has_entree": true, "has_drink": false},
-      "suggest": [{"tag": "soft_drink"}, {"tag": "beer"}],
-      "playbook_script": "Can I start you off with something to drink? We have a great local IPA on draft."
+      "suggest": [
+        {"tag": "soft_drink"},
+        {"tag": "beer"}
+      ],
+      "playbook_script": "Can I start you off with something to drink? Our margaritas are on special tonight."
+    },
+    {
+      "id": "rule_dessert_hint",
+      "if": {"has_entree": true, "has_drink": true},
+      "suggest": [
+        {"item_id": "item_brownie"},
+        {"item_id": "item_triple_choc_meltdown"}
+      ],
+      "playbook_script": "Save room for dessert - the Triple Chocolate Meltdown is amazing."
     },
     {
       "id": "rule_fries_with_burger",
       "if": {"has_entree": false, "has_drink": false},
-      "suggest": [{"item_id": "item_fries"}],
-      "playbook_script": "Would you like to add fries? They're extra crispy today."
+      "suggest": [
+        {"item_id": "item_fries"}
+      ],
+      "playbook_script": "Would you like to add fries or a side salad with that?"
     }
   ]
 }

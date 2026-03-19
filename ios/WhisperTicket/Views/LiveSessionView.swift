@@ -11,7 +11,7 @@ struct LiveSessionView: View {
         NavigationStack {
             if let vm {
                 VStack(spacing: 0) {
-                    // Low complexity: noise warning banner
+                    // Noise warning
                     if vm.showNoisyEnvironmentWarning {
                         Label("Loud environment — speak clearly", systemImage: "waveform.badge.exclamationmark")
                             .font(.caption)
@@ -21,14 +21,14 @@ struct LiveSessionView: View {
                             .background(.orange)
                     }
 
-                    // Low complexity: allergy alerts
+                    // Allergy alerts
                     ForEach(vm.allergyItemsPendingConfirm) { item in
                         AllergyAlertBanner(item: item) {
                             vm.confirmAllergyItem(item)
                         }
                     }
 
-                    // Medium complexity: voice macro prompt
+                    // Voice macro prompt
                     if let macro = vm.detectedMacro {
                         HStack {
                             Image(systemName: "mic.badge.plus")
@@ -58,7 +58,7 @@ struct LiveSessionView: View {
 
                             // Live ticket draft
                             if !vm.draft.items.isEmpty {
-                                GroupBox("Ticket Draft — Table \(tableNumber)") {
+                                GroupBox("Order Draft — Table \(tableNumber)") {
                                     ForEach(vm.draft.items) { item in
                                         DraftItemRow(item: item) {
                                             vm.removeItem(item)
@@ -97,7 +97,6 @@ struct LiveSessionView: View {
                             }
                         }
 
-                        // Noise level indicator
                         if vm.isRecording {
                             HStack {
                                 Image(systemName: "waveform")
@@ -111,13 +110,14 @@ struct LiveSessionView: View {
                         }
 
                         HStack(spacing: 20) {
-                            // Low complexity: repeat-back coach
+                            // Confirm = repeat-back + quick send to kitchen
                             Button {
                                 vm.triggerRepeatBack()
                             } label: {
-                                Label("Confirm", systemImage: "arrow.uturn.backward.circle")
+                                Label("Confirm", systemImage: "checkmark.circle")
                             }
                             .buttonStyle(.bordered)
+                            .tint(.green)
                             .disabled(vm.draft.items.isEmpty)
 
                             // Hold-to-talk
@@ -126,7 +126,7 @@ struct LiveSessionView: View {
                                 else { vm.startRecording() }
                             }
 
-                            // Proceed to editor
+                            // Edit = create ticket, go to full editor
                             Button {
                                 Task { await confirmAndNavigate(vm: vm) }
                             } label: {
@@ -144,7 +144,11 @@ struct LiveSessionView: View {
                     get: { vm.showRepeatBack },
                     set: { vm.showRepeatBack = $0 }
                 )) {
-                    RepeatBackSheet(text: vm.repeatBackText)
+                    RepeatBackSheet(text: vm.repeatBackText) {
+                        // "Confirm & Send" tapped — create ticket and fire to kitchen
+                        vm.showRepeatBack = false
+                        Task { await confirmAndSend(vm: vm) }
+                    }
                 }
                 .navigationDestination(item: $navigateToEditor) { ticket in
                     TicketEditorView(ticket: ticket)
@@ -173,6 +177,7 @@ struct LiveSessionView: View {
         }
     }
 
+    /// Edit path: create ticket, navigate to editor for review before sending.
     private func confirmAndNavigate(vm: LiveSessionViewModel) async {
         do {
             let ticket = try await services.repository.createTicket(
@@ -181,6 +186,21 @@ struct LiveSessionView: View {
             navigateToEditor = ticket
         } catch {
             createTicketError = "Could not create ticket: \(error.localizedDescription)"
+        }
+    }
+
+    /// Confirm path: create ticket AND send to kitchen immediately.
+    private func confirmAndSend(vm: LiveSessionViewModel) async {
+        do {
+            let ticket = try await services.repository.createTicket(
+                from: vm.draft, serverId: "local_server"
+            )
+            ticket.sentToKitchenAt = Date()
+            ticket.status = TicketStatus.sent.rawValue
+            try await services.repository.save(ticket)
+            navigateToEditor = ticket
+        } catch {
+            createTicketError = "Could not send ticket: \(error.localizedDescription)"
         }
     }
 }
@@ -273,17 +293,40 @@ struct AllergyAlertBanner: View {
 
 struct RepeatBackSheet: View {
     let text: String
+    let onSendToKitchen: () -> Void
     @Environment(\.dismiss) var dismiss
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(text).font(.title3).padding()
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Review the order with your guests before sending to the kitchen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(text)
+                        .font(.body)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding()
             }
             .navigationTitle("Confirm Order")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Edit Order") { dismiss() }
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button {
+                        onSendToKitchen()
+                    } label: {
+                        Label("Send to Kitchen", systemImage: "flame.fill")
+                            .fontWeight(.bold)
+                    }
+                    .tint(.orange)
                 }
             }
         }
@@ -302,7 +345,6 @@ struct UpsellSuggestionsView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(suggestion.menuItem.name).fontWeight(.medium)
-                        // Medium complexity: playbook script display
                         if let script = suggestion.playbookScript {
                             Text(script).font(.caption).foregroundStyle(.secondary).italic()
                         } else {
