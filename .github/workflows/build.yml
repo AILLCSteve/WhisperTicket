@@ -164,23 +164,18 @@ jobs:
           KEY_PATH=~/.private_keys/AuthKey_${KEY_ID}.p8
           BUILD_NUMBER="${{ github.run_number }}"
 
-          # ── Generate JWT (ES256, 20-minute expiry) ──────────────────────
-          NOW=$(date +%s)
-          EXP=$((NOW + 1200))
-          HEADER=$(printf '{"alg":"ES256","kid":"%s","typ":"JWT"}' "$KEY_ID" \
-            | openssl base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
-          PAYLOAD=$(printf '{"iss":"%s","iat":%d,"exp":%d,"aud":"appstoreconnect-v1"}' \
-            "$ISSUER_ID" "$NOW" "$EXP" \
-            | openssl base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
-          # openssl dgst -sign → DER-encoded ECDSA; JWT ES256 needs raw R||S.
-          # One-liner avoids multiline indentation issues in YAML.
-          SIG=$(printf '%s.%s' "$HEADER" "$PAYLOAD" \
-            | openssl dgst -binary -sha256 -sign "$KEY_PATH" \
-            | python3 -c 'import sys,base64;d=sys.stdin.buffer.read();i=2;rl=d[i+1];i+=2;r=d[i:i+rl];i+=rl;sl=d[i+1];i+=2;s=d[i:i+sl];r=r.lstrip(b"\x00").rjust(32,b"\x00")[-32:];s=s.lstrip(b"\x00").rjust(32,b"\x00")[-32:];print(base64.urlsafe_b64encode(r+s).rstrip(b"=").decode())')
-          JWT="${HEADER}.${PAYLOAD}.${SIG}"
+          # ── Generate JWT via Python (avoids openssl DER/RS issues and
+          #    LibreSSL fragility; also strips secret whitespace) ───────────
+          pip3 install cryptography --quiet 2>/dev/null || true
+          JWT=$(python3 scripts/gen_asc_jwt.py "$KEY_PATH" "$KEY_ID" "$ISSUER_ID")
+          echo "JWT generated (${#JWT} chars)"
+
+          # Note: --http1.1 is required to bypass a curl HTTP/2 + --fail bug
+          # (curl #13411) where ASC's HTTP 401 surfaces as exit code 56
+          # instead of the correct exit code 22.
 
           # ── Find app by bundle ID ───────────────────────────────────────
-          APP_RESP=$(curl -gsf \
+          APP_RESP=$(curl -gsSf --http1.1 \
             -H "Authorization: Bearer $JWT" \
             "https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=com.whisperticket.app&fields[apps]=id,name")
           APP_ID=$(echo "$APP_RESP" | python3 -c \
@@ -190,7 +185,7 @@ jobs:
           # ── Wait for build to appear (up to 3 min, checks every 20s) ───
           BUILD_ID=""
           for i in $(seq 1 9); do
-            BUILD_RESP=$(curl -gsf \
+            BUILD_RESP=$(curl -gsSf --http1.1 \
               -H "Authorization: Bearer $JWT" \
               "https://api.appstoreconnect.apple.com/v1/builds?filter[app]=$APP_ID&filter[version]=$BUILD_NUMBER&sort=-uploadedDate&limit=1&fields[builds]=id,processingState,usesNonExemptEncryption" \
               || echo '{"data":[]}')
@@ -210,7 +205,7 @@ jobs:
           fi
 
           # ── Set usesNonExemptEncryption = false ─────────────────────────
-          PATCH_RESP=$(curl -gsf -X PATCH \
+          PATCH_RESP=$(curl -gsSf --http1.1 -X PATCH \
             -H "Authorization: Bearer $JWT" \
             -H "Content-Type: application/json" \
             -d "{\"data\":{\"type\":\"builds\",\"id\":\"$BUILD_ID\",\"attributes\":{\"usesNonExemptEncryption\":false}}}" \
@@ -219,7 +214,7 @@ jobs:
             "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('attributes',{}).get('usesNonExemptEncryption','(no response)'))" 2>/dev/null || echo 'done')"
 
           # ── Find internal beta groups ────────────────────────────────────
-          GROUPS_RESP=$(curl -gsf \
+          GROUPS_RESP=$(curl -gsSf --http1.1 \
             -H "Authorization: Bearer $JWT" \
             "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/betaGroups?filter[isInternalGroup]=true&fields[betaGroups]=id,name")
           GROUPS=$(echo "$GROUPS_RESP" | python3 -c \
@@ -233,7 +228,7 @@ jobs:
           # ── Add build to each internal group ────────────────────────────
           while IFS='|' read -r GROUP_ID GROUP_NAME; do
             echo "Adding build to group: $GROUP_NAME ($GROUP_ID)"
-            curl -gsf -X POST \
+            curl -gsSf --http1.1 -X POST \
               -H "Authorization: Bearer $JWT" \
               -H "Content-Type: application/json" \
               -d "{\"data\":[{\"type\":\"builds\",\"id\":\"$BUILD_ID\"}]}" \
