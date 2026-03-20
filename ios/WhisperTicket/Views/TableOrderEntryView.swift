@@ -436,7 +436,7 @@ struct SeatChip: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Use a helpful cue: "Mom", "Blue shirt", "Window seat"")
+            Text("Use a helpful cue: \"Mom\", \"Blue shirt\", \"Window seat\"")
         }
     }
 }
