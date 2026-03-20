@@ -16,6 +16,8 @@ final class LiveSessionViewModel {
     var errorMessage: String? = nil
     var allergyItemsPendingConfirm: [DraftItem] = []
     var isFinalizingTranscription = false   // shows "Processing…" indicator in UI
+    var activeSeatNumber: Int = 1           // which seat is currently being ordered for
+    var activeSeatLabel: String = ""        // display name for the active seat
 
     private let audioCapture: AudioCaptureServiceProtocol
     private let transcriptionService: TranscriptionServiceProtocol
@@ -101,6 +103,41 @@ final class LiveSessionViewModel {
         refreshUpsells()
     }
 
+    /// Add a free-text item manually (no menu matching needed).
+    /// Attributed to the currently active seat.
+    func addManualItem(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let item = DraftItem(
+            menuItemId: "manual_\(UUID().uuidString)",
+            name: trimmed,
+            quantity: 1,
+            modifierNames: [], negations: [],
+            course: .entree,
+            seatNumber: activeSeatNumber,
+            notes: "", confidence: 1.0, hasAllergyFlag: false
+        )
+        draft.items.append(item)
+        refreshUpsells()
+    }
+
+    /// Clear all items for a specific seat (allow server to re-record that seat).
+    func clearSeat(_ seatNumber: Int) {
+        draft.items.removeAll { $0.seatNumber == seatNumber }
+        refreshUpsells()
+    }
+
+    /// Returns items grouped by seat number, sorted by seat.
+    func itemsBySeat() -> [(seatNumber: Int, items: [DraftItem])] {
+        let allSeats = Set(draft.items.compactMap { $0.seatNumber }).sorted()
+        let unseated = draft.items.filter { $0.seatNumber == nil }
+        var result = allSeats.map { seat in
+            (seatNumber: seat, items: draft.items.filter { $0.seatNumber == seat })
+        }
+        if !unseated.isEmpty { result.append((seatNumber: 0, items: unseated)) }
+        return result
+    }
+
     func applyMacro(_ macro: VoiceMacro, previousDraft: TicketDraft?) {
         switch macro {
         case .repeatLastOrder:
@@ -138,9 +175,15 @@ final class LiveSessionViewModel {
             return
         }
 
+        let previousIds = Set(draft.items.map { $0.id })
         let updatedDraft = parser.parseDraft(transcript: segment.text, existingDraft: draft, menu: menu)
         draft = updatedDraft
         draft.rawTranscript = segment.text   // keep in sync after parse
+
+        // Stamp newly added items with the currently active seat
+        for i in draft.items.indices where !previousIds.contains(draft.items[i].id) {
+            draft.items[i].seatNumber = activeSeatNumber
+        }
 
         let existingIds = Set(allergyItemsPendingConfirm.map { $0.id })
         let newAllergyItems = draft.items.filter { $0.hasAllergyFlag && !existingIds.contains($0.id) }

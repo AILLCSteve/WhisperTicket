@@ -1,84 +1,69 @@
 import SwiftUI
 
-/// The main floor view — shows all tables with live status from active tickets.
-/// Replaces the old TableSelectView with a situationally-aware layout.
+/// The operational floor view — shows live ticket status per table.
+/// Tapping an available table → TableOrderEntryView (seat-first ordering).
+/// Tapping an active table → TicketEditorView.
+/// Toolbar: Edit Floor Plan → FloorPlanEditorView.
 struct FloorView: View {
     @Environment(\.appServices) var services
 
-    // Navigation state
-    @State private var selectedTable = ""
-    @State private var navigateToLiveSession = false
-    @State private var navigateToTicket: Ticket? = nil
+    // Navigation
+    @State private var navigateToOrder: FloorTable?
+    @State private var navigateToTicket: Ticket?
+    @State private var showEditor = false
 
-    // Floor data
-    @State private var activeTickets: [String: Ticket] = [:]   // tableNumber → Ticket
-    @State private var isLoading = false
-    @State private var customTable = ""
+    // Live ticket data
+    @State private var activeTickets: [String: Ticket] = [:]  // tableName → Ticket
+
+    // Custom table entry for off-plan tables
     @State private var showCustomEntry = false
-
-    private let presetTables = [
-        "1","2","3","4","5","6","7","8","9","10","11","12","Bar","Patio"
-    ]
-
-    // Tables that currently have active (non-closed) tickets
-    private var activeTables: [String] {
-        presetTables.filter { activeTickets[$0] != nil }
-    }
-    private var availableTables: [String] {
-        presetTables.filter { activeTickets[$0] == nil }
-    }
+    @State private var customTableName = ""
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    let plan = services.floorPlanStore.floorPlan
+                    let activeTables = plan.tables.filter { activeTickets[$0.name] != nil }
+                    let availableTables = plan.tables.filter { activeTickets[$0.name] == nil }
 
-                    // Active tables section
+                    // ── Active Tables ──────────────────────────────────
                     if !activeTables.isEmpty {
-                        SectionHeader(title: "Active Tables", count: activeTables.count, color: .orange)
+                        SectionHeader(title: "Active", count: activeTables.count, color: .orange)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
-                            ForEach(activeTables, id: \.self) { table in
+                            ForEach(activeTables) { table in
                                 ActiveTableCard(
-                                    tableNumber: table,
-                                    ticket: activeTickets[table]!
+                                    table: table,
+                                    ticket: activeTickets[table.name]!,
+                                    section: plan.sections.first { $0.tableIds.contains(table.id) }
                                 ) {
-                                    navigateToTicket = activeTickets[table]
+                                    navigateToTicket = activeTickets[table.name]
                                 }
                             }
                         }
                     }
 
-                    // Available tables section
-                    SectionHeader(
-                        title: activeTables.isEmpty ? "All Tables" : "Available",
-                        count: availableTables.count,
-                        color: .green
-                    )
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
-                        ForEach(availableTables, id: \.self) { table in
-                            AvailableTableCard(tableNumber: table) {
-                                selectedTable = table
-                                navigateToLiveSession = true
+                    // ── Available Tables (by section) ──────────────────
+                    let sections = plan.sections
+                    if !sections.isEmpty {
+                        ForEach(sections) { section in
+                            let sectionTables = availableTables.filter { section.tableIds.contains($0.id) }
+                            if !sectionTables.isEmpty {
+                                SectionHeader(title: section.name, count: sectionTables.count, color: section.color)
+                                availableGrid(sectionTables)
                             }
                         }
-
-                        // Custom table button
-                        Button {
-                            showCustomEntry = true
-                        } label: {
-                            VStack(spacing: 6) {
-                                Image(systemName: "plus.circle.dashed")
-                                    .font(.title2)
-                                    .foregroundStyle(.secondary)
-                                Text("Other")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 80)
-                            .background(.secondary.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        // Unassigned tables
+                        let unassigned = availableTables.filter { t in
+                            !sections.contains(where: { $0.tableIds.contains(t.id) })
                         }
+                        if !unassigned.isEmpty {
+                            SectionHeader(title: activeTables.isEmpty ? "All Tables" : "Available", count: unassigned.count, color: .green)
+                            availableGrid(unassigned)
+                        }
+                    } else {
+                        SectionHeader(title: activeTables.isEmpty ? "All Tables" : "Available", count: availableTables.count, color: .green)
+                        availableGrid(availableTables)
                     }
                 }
                 .padding()
@@ -87,50 +72,72 @@ struct FloorView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await loadActiveTickets() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 12) {
+                        Button { Task { await loadActiveTickets() } } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Button { showEditor = true } label: {
+                            Image(systemName: "pencil.circle")
+                        }
                     }
                 }
             }
             .refreshable { await loadActiveTickets() }
-            .navigationDestination(isPresented: $navigateToLiveSession) {
-                if !selectedTable.isEmpty {
-                    LiveSessionView(tableNumber: selectedTable)
-                }
+            .task { await loadActiveTickets() }
+            .onAppear { Task { await loadActiveTickets() } }
+            .navigationDestination(item: $navigateToOrder) { table in
+                TableOrderEntryView(table: table)
             }
             .navigationDestination(item: $navigateToTicket) { ticket in
                 TicketEditorView(ticket: ticket)
             }
-            .alert("Table Number", isPresented: $showCustomEntry) {
-                TextField("e.g. 13, Booth 4, Bar 2", text: $customTable)
-                Button("Start Order") {
-                    let t = customTable.trimmingCharacters(in: .whitespaces)
-                    if !t.isEmpty {
-                        selectedTable = t
-                        navigateToLiveSession = true
-                    }
-                    customTable = ""
-                }
-                Button("Cancel", role: .cancel) { customTable = "" }
+            .sheet(isPresented: $showEditor) {
+                FloorPlanEditorView()
             }
-            .task { await loadActiveTickets() }
-            .onAppear { Task { await loadActiveTickets() } }
+            .alert("Custom Table", isPresented: $showCustomEntry) {
+                TextField("e.g. Bar 3, Booth A", text: $customTableName)
+                Button("Start Order") {
+                    let name = customTableName.trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty else { return }
+                    // Create an ad-hoc FloorTable (not persisted)
+                    navigateToOrder = FloorTable(name: name, seats: SeatConfig.numbered(2))
+                    customTableName = ""
+                }
+                Button("Cancel", role: .cancel) { customTableName = "" }
+            }
         }
     }
 
-    private func loadActiveTickets() async {
-        isLoading = true
-        defer { isLoading = false }
-        guard let all = try? await services.repository.fetchAll() else { return }
-        // Show tickets that are open, sent, or delivered (not closed)
-        let relevant = all.filter { $0.ticketStatus != .closed }
-        // Last active ticket per table wins
-        var map: [String: Ticket] = [:]
-        for ticket in relevant.reversed() {
-            map[ticket.tableNumber] = ticket
+    // MARK: - Available Grid
+
+    @ViewBuilder
+    private func availableGrid(_ tables: [FloorTable]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
+            ForEach(tables) { table in
+                AvailableTableCard(table: table) {
+                    navigateToOrder = table
+                }
+            }
+            Button { showCustomEntry = true } label: {
+                VStack(spacing: 6) {
+                    Image(systemName: "plus.circle.dashed").font(.title2).foregroundStyle(.secondary)
+                    Text("Other").font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity).frame(height: 80)
+                .background(.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
         }
+    }
+
+    // MARK: - Data
+
+    private func loadActiveTickets() async {
+        guard let all = try? await services.repository.fetchAll() else { return }
+        let relevant = all.filter { $0.ticketStatus != .closed }
+        var map: [String: Ticket] = [:]
+        for ticket in relevant.reversed() { map[ticket.tableNumber] = ticket }
         activeTickets = map
     }
 }
@@ -138,8 +145,9 @@ struct FloorView: View {
 // MARK: - Active Table Card
 
 struct ActiveTableCard: View {
-    let tableNumber: String
+    let table: FloorTable
     let ticket: Ticket
+    let section: ServerSection?
     let onTap: () -> Void
 
     @State private var elapsed: TimeInterval = 0
@@ -165,32 +173,33 @@ struct ActiveTableCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Table \(tableNumber)")
-                        .font(.title3.bold())
-                        .foregroundStyle(.primary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(table.name).font(.title3.bold()).foregroundStyle(.primary)
+                        if let section {
+                            HStack(spacing: 4) {
+                                Circle().fill(section.color).frame(width: 6, height: 6)
+                                Text(section.name).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     Spacer()
-                    Image(systemName: statusIcon)
-                        .foregroundStyle(statusColor)
-                        .font(.title3)
+                    Image(systemName: statusIcon).foregroundStyle(statusColor).font(.title3)
                 }
 
                 HStack(spacing: 6) {
                     Text(ticket.ticketStatus.rawValue.capitalized)
-                        .font(.caption.bold())
-                        .foregroundStyle(statusColor)
-                    Text("·")
-                        .foregroundStyle(.secondary)
+                        .font(.caption.bold()).foregroundStyle(statusColor)
+                    Text("·").foregroundStyle(.secondary)
                     Text("\(ticket.allItems.count) item\(ticket.allItems.count == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("·").foregroundStyle(.secondary)
+                    Text("\(table.seats.count)👤").font(.caption).foregroundStyle(.secondary)
                 }
 
                 HStack {
-                    Image(systemName: "clock")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "clock").font(.caption2).foregroundStyle(.secondary)
                     Text(formatElapsed(elapsed))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(elapsed > 1200 ? .red : elapsed > 600 ? .orange : .secondary)
@@ -199,10 +208,7 @@ struct ActiveTableCard: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(statusColor.opacity(0.08))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(statusColor.opacity(0.25), lineWidth: 1)
-            )
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(statusColor.opacity(0.25), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
@@ -211,8 +217,7 @@ struct ActiveTableCard: View {
     }
 
     private func formatElapsed(_ t: TimeInterval) -> String {
-        let m = Int(t) / 60
-        let s = Int(t) % 60
+        let m = Int(t) / 60; let s = Int(t) % 60
         return m > 0 ? "\(m)m \(s)s" : "\(s)s"
     }
 }
@@ -220,26 +225,19 @@ struct ActiveTableCard: View {
 // MARK: - Available Table Card
 
 struct AvailableTableCard: View {
-    let tableNumber: String
+    let table: FloorTable
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 6) {
-                Text(tableNumber)
-                    .font(.title2.bold())
-                    .foregroundStyle(.primary)
-                Text("Available")
-                    .font(.caption2)
-                    .foregroundStyle(.green)
+            VStack(spacing: 4) {
+                Text(table.name).font(.title2.bold()).foregroundStyle(.primary)
+                Text("\(table.seats.count)👤").font(.caption2).foregroundStyle(.secondary)
+                Text("Available").font(.caption2).foregroundStyle(.green)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 80)
+            .frame(maxWidth: .infinity).frame(height: 84)
             .background(Color.green.opacity(0.07))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.green.opacity(0.2), lineWidth: 1)
-            )
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.green.opacity(0.2), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
@@ -255,12 +253,10 @@ private struct SectionHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title)
-                .font(.headline)
+            Text(title).font(.headline)
             Text("\(count)")
                 .font(.caption.bold())
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(color.opacity(0.15))
                 .foregroundStyle(color)
                 .clipShape(Capsule())

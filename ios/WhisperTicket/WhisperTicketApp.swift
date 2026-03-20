@@ -12,6 +12,7 @@ struct WhisperTicketApp: App {
     let menuStore: MenuStoreProtocol = LocalBundleMenuStore()
     let parser: OrderParserProtocol = FuzzyMenuOrderParser()
     let upsellEngine: UpsellEngineProtocol = RuleBasedUpsellEngine()
+    let floorPlanStore = FloorPlanStore()
 
     init() {
         do {
@@ -39,7 +40,8 @@ struct WhisperTicketApp: App {
                     parser: parser,
                     upsellEngine: upsellEngine,
                     repository: SwiftDataTicketRepository(modelContext: container.mainContext),
-                    menuImporter: StubMenuImportService()    // NEW
+                    menuImporter: StubMenuImportService(),
+                    floorPlanStore: floorPlanStore
                 ))
                 .task {
                     do {
@@ -62,7 +64,8 @@ struct AppServices {
     let parser: OrderParserProtocol
     let upsellEngine: UpsellEngineProtocol
     let repository: TicketRepositoryProtocol
-    let menuImporter: MenuImportServiceProtocol    // NEW
+    let menuImporter: MenuImportServiceProtocol
+    let floorPlanStore: FloorPlanStore
 }
 
 // Placeholder used only as @Entry default — the real services are always injected
@@ -94,6 +97,7 @@ extension EnvironmentValues {
         parser: FuzzyMenuOrderParser(),
         upsellEngine: RuleBasedUpsellEngine(),
         repository: PlaceholderTicketRepository(),
-        menuImporter: StubMenuImportService()    // NEW
+        menuImporter: StubMenuImportService(),
+        floorPlanStore: FloorPlanStore()
     )
 }

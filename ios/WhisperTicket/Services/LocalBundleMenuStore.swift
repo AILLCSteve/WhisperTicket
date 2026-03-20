@@ -8,15 +8,58 @@ final class LocalBundleMenuStore: MenuStoreProtocol {
     private var searchIndex: [(tokens: [String], item: MenuItem)] = []
 
     func loadMenu() async throws {
-        guard let url = Bundle.main.url(forResource: "MenuV1.sample", withExtension: "json") else {
+        guard let url = resolveMenuURL() else {
+            let available = (Bundle.main.urls(forResourcesWithExtension: "json", subdirectory: nil) ?? [])
+                .map { $0.lastPathComponent }
+            print("⚠️ MenuV1.sample.json not found. Bundle JSON files: \(available)")
             throw MenuStoreError.fileNotFound
         }
-        let data = try Data(contentsOf: url)
-        let loaded = try JSONDecoder().decode(MenuV1.self, from: data)
-        await MainActor.run {
-            self.menu = loaded
-            self.buildIndex(from: loaded)
+        do {
+            let data = try Data(contentsOf: url)
+            let loaded = try JSONDecoder().decode(MenuV1.self, from: data)
+            await MainActor.run {
+                self.menu = loaded
+                self.buildIndex(from: loaded)
+            }
+        } catch let error as DecodingError {
+            print("⚠️ Menu decode error: \(error)")
+            throw MenuStoreError.decodingFailed
         }
+    }
+
+    /// Tries several lookup strategies to locate the menu JSON regardless of
+    /// how XcodeGen packaged the resource in the bundle.
+    private func resolveMenuURL() -> URL? {
+        // 1. Standard lookup — works when XcodeGen copies file flat to bundle root
+        if let url = Bundle.main.url(forResource: "MenuV1.sample", withExtension: "json") {
+            return url
+        }
+        // 2. Direct path from bundle root (some XcodeGen configs)
+        let direct = Bundle.main.bundleURL.appendingPathComponent("MenuV1.sample.json")
+        if FileManager.default.fileExists(atPath: direct.path) { return direct }
+
+        // 3. Scan all bundle JSON files — handles renamed / path-preserved copies
+        if let urls = Bundle.main.urls(forResourcesWithExtension: "json", subdirectory: nil) {
+            if let match = urls.first(where: {
+                $0.lastPathComponent.lowercased().contains("menu") &&
+                $0.lastPathComponent.lowercased().contains("v1")
+            }) { return match }
+            // Broader fallback: any JSON file in bundle with "menu" in the name
+            if let match = urls.first(where: {
+                $0.lastPathComponent.lowercased().contains("menu")
+            }) { return match }
+        }
+
+        // 4. Subdirectory scan (XcodeGen may preserve folder structure)
+        for subdir in ["Resources", "WhisperTicket", "ios"] {
+            if let urls = Bundle.main.urls(forResourcesWithExtension: "json", subdirectory: subdir) {
+                if let match = urls.first(where: {
+                    $0.lastPathComponent.lowercased().contains("menu")
+                }) { return match }
+            }
+        }
+
+        return nil
     }
 
     func findBestMatches(text: String, maxResults: Int = 3) -> [(item: MenuItem, score: Double)] {
@@ -41,7 +84,6 @@ final class LocalBundleMenuStore: MenuStoreProtocol {
                 itemIndex[item.id] = item
                 let tokens = normalize(item.name).split(separator: " ").map(String.init)
                 searchIndex.append((tokens: tokens, item: item))
-                // Also add plural/alias variants
                 let plural = tokens.map { $0.hasSuffix("s") ? $0 : $0 + "s" }
                 searchIndex.append((tokens: plural, item: item))
             }
@@ -63,7 +105,16 @@ final class LocalBundleMenuStore: MenuStoreProtocol {
     }
 }
 
-enum MenuStoreError: Error {
+enum MenuStoreError: Error, LocalizedError {
     case fileNotFound
     case decodingFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .fileNotFound:
+            return "Menu file not found in app bundle. Try reloading — if the problem persists, reinstall the app."
+        case .decodingFailed:
+            return "Menu file could not be read. The file may be corrupted."
+        }
+    }
 }
