@@ -170,16 +170,23 @@ jobs:
           JWT=$(python3 scripts/gen_asc_jwt.py "$KEY_PATH" "$KEY_ID" "$ISSUER_ID")
           echo "JWT generated (${#JWT} chars)"
 
-          # ASC JSON:API uses filter[x] and fields[x] query params. Square
-          # brackets are RFC 3986 gen-delims — not valid unencoded in query
-          # strings under strict HTTP parsing. Percent-encode them so both
-          # HTTP/1.1 and HTTP/2 endpoints accept the request without 400.
-          # -S shows curl errors even in silent mode; -f fails on 4xx/5xx.
-
-          # ── Find app by bundle ID ───────────────────────────────────────
-          APP_RESP=$(curl -sSf \
+          # ── Find app by bundle ID (diagnostic: capture body on any status) ──
+          # --http1.1: forces HTTP/1.1 so 4xx exits with code 22 not 56
+          # (curl HTTP/2 + --fail bug #13411 masks 4xx as RECV_ERROR/56).
+          # -o + -w: capture body AND http status separately so we can log
+          # the exact ASC error JSON before deciding whether to continue.
+          HTTP_STATUS=$(curl -sS --http1.1 \
             -H "Authorization: Bearer $JWT" \
+            -o /tmp/asc_app_resp.json \
+            -w "%{http_code}" \
             "https://api.appstoreconnect.apple.com/v1/apps?filter%5BbundleId%5D=com.whisperticket.app&fields%5Bapps%5D=id,name")
+          echo "=== ASC /v1/apps HTTP $HTTP_STATUS ==="
+          cat /tmp/asc_app_resp.json
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "ERROR: ASC returned HTTP $HTTP_STATUS — see response above"
+            exit 1
+          fi
+          APP_RESP=$(cat /tmp/asc_app_resp.json)
           APP_ID=$(echo "$APP_RESP" | python3 -c \
             "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
           echo "App ID: $APP_ID"
