@@ -224,9 +224,23 @@ Do not let transport models, ORM quirks, or UI concerns leak into core business 
 
 ---
 
-## 6. Debugging Mode (Circumspect by Default)
+## 6. Debugging Mode — Evidence First, Always
 
-When debugging, adopt a skeptical posture.
+**The Iron Law: no fix without confirmed root cause.**
+
+Guessing wastes cycles and introduces new bugs. This section is binding for every debug session, regardless of how obvious the fix appears.
+
+### 6.0 The Non-Negotiable Pre-Fix Sequence
+
+Before writing a single line of fix code:
+
+1. **Read the actual error output in full.** Not a summary — the raw log, the full stack trace, the exact exit code, the exact failing line.
+2. **Fetch CI logs when the failure is remote.** Use `gh run view <id> --log` or equivalent. Never debug CI from the user's screenshot alone.
+3. **State the observed failure precisely** in one sentence: what command, what exit code, what error message, at what timestamp.
+4. **Trace the execution path** from the failing command backward to its inputs. What produced the bad input? What assumption was wrong?
+5. **Form hypotheses ranked by evidence**, not by how fixable they are. Evidence = log output, timestamps, exit codes, file contents, RFC specs. Not intuition.
+6. **Add instrumentation if evidence is insufficient.** If the failure is opaque (silent flag suppressing output, masked exit code, no log), the correct next step is a diagnostic commit that surfaces more information — not a guess at the fix.
+7. **Only then implement the smallest fix that addresses the confirmed root cause.**
 
 ### 6.1 Debugging Rules
 - Treat first hypotheses as provisional
@@ -234,24 +248,47 @@ When debugging, adopt a skeptical posture.
 - Reproduce before patching whenever practical
 - Inspect the narrowest failing path first, then widen scope
 - Verify the fix against adjacent flows and likely regressions
+- **Never patch a symptom.** If exit code 56 appears, find out why before changing anything. Exit codes, HTTP status codes, and error messages are evidence — read them as such.
 
-### 6.2 Debugging Workflow
-1. Define the observed failure precisely
-2. Find the execution path responsible
-3. Check recent change points, contracts, and assumptions
-4. Form 1–3 plausible hypotheses
-5. Test hypotheses against evidence
-6. Patch the root cause, not the symptom
-7. Re-run or mentally validate impacted paths
-8. Add or update tests if the bug is meaningful/repeatable
+### 6.2 Evidence-First Debugging Workflow
+1. Get the raw failure: exact error text, exit code, timestamp, failing command
+2. Identify which command produced the failure and what its inputs were
+3. Check recent changes that could have caused it
+4. Research the error code / message against official docs or known issues if unfamiliar
+5. Form 1–3 hypotheses ranked by evidence quality (strongest evidence → highest priority)
+6. If evidence is insufficient: add diagnostics (`set -x`, remove `-s` flags, add `echo` checkpoints, fetch full CI logs) and re-run before guessing
+7. Test the top hypothesis with the **minimum possible change**
+8. Confirm the fix with real output, not reasoning
+9. If fix attempt #3 fails: stop patching and question the architecture
 
-### 6.3 Avoid These Failure Modes
-- cargo-cult patches
-- “just add a null check” when a contract is broken upstream
-- rewriting unrelated modules while debugging a localized defect
-- claiming something is fixed without indicating how it was validated
+### 6.3 The 3-Strike Rule
+If three distinct fix attempts have failed:
+- **Stop.** Do not attempt fix #4.
+- Question whether the approach itself is wrong, not just the implementation.
+- Discuss the architectural assumptions with the user before proceeding.
+- Past fixes that “almost worked” do not count as investigation — they are noise.
 
-### 6.4 Special Rule for iOS / CI Debugging
+### 6.4 Multi-Component System Debugging
+When a failure is deep in a pipeline (CI → archive → signing → ASC API):
+
+**Before proposing fixes**, add diagnostic instrumentation at each boundary:
+```bash
+echo “=== JWT generated: ${#JWT} chars ===”
+echo “=== curl HTTP response code: $(curl -o /dev/null -s -w '%{http_code}' ...)===”
+echo “=== Key file exists: $(ls -la $KEY_PATH) ===”
+```
+Run one diagnostic CI pass. Use the output to identify which layer fails. Fix that layer.
+
+Never debug a lower layer (JWT format) while the upper layer (URL encoding, flag interaction) is still unconfirmed.
+
+### 6.5 Avoid These Failure Modes
+- Cargo-cult patches: changing something because it “looks wrong” without confirming it causes the failure
+- “Just try this” fixes applied before evidence is gathered
+- Suppressing error flags (`-s`, `2>/dev/null`) without adding compensating visibility elsewhere
+- Claiming something is fixed without actual output confirming it
+- Debugging the wrong layer: treating exit code 56 as a network issue without first ruling out HTTP 401 masking
+
+### 6.6 Special Rule for iOS / CI Debugging
 Classify the failure before patching. Put it in one of these buckets:
 - repository/config problem
 - workflow/YAML problem
@@ -266,7 +303,7 @@ Classify the failure before patching. Put it in one of these buckets:
 
 Do not solve a later bucket until earlier buckets are reasonably ruled out.
 
-### 6.5 Release-Engineering Debugging Order
+### 6.7 Release-Engineering Debugging Order
 For iOS delivery, debug in this order unless evidence clearly says otherwise:
 1. identifiers/config
 2. project generation
@@ -276,6 +313,17 @@ For iOS delivery, debug in this order unless evidence clearly says otherwise:
 6. export options
 7. upload
 8. Apple validation/content issues
+
+### 6.8 Lessons from This Repository's CI Debugging History
+
+These are confirmed patterns learned from actual failures in this codebase:
+
+- **curl exit 56 on ASC API** = curl HTTP/2 + `--fail` bug ([curl #13411](https://github.com/curl/curl/issues/13411)) masking an HTTP 401. Root cause is invalid JWT, not network failure. Do not treat as network issue.
+- **Unencoded brackets in ASC URLs** (`filter[x]`, `fields[x]`) = RFC 3986 violation. ASC's HTTP/1.1 endpoint returns 400. Fix: percent-encode as `%5B` / `%5D`. HTTP/2 is more lenient.
+- **`openssl dgst -sign` output** = DER-encoded ECDSA. JWT ES256 requires raw R||S (64 bytes). Use `scripts/gen_asc_jwt.py` (Python `cryptography` library) — do not roll a new bash converter.
+- **`macos-latest` runner** is currently `macos-15-arm64` with Xcode 26.3. iOS 26 SDK breaking changes affect SwiftUI (`.accentColor` removed as ShapeStyle, ForEach binding overload ambiguity, `CGSize: @retroactive Codable` redundant).
+- **YAML `run:` literal block scalars**: Python/script code at column 0 terminates the block. Multi-line scripts that need column-0 content (heredoc closing delimiter) must live in repo files, not inline.
+- **`ITSAppUsesNonExemptEncryption: false` in Info.plist** = Apple auto-answers compliance at upload time. The ASC API compliance PATCH is redundant but still runs for beta group distribution.
 
 ---
 

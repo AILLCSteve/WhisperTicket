@@ -170,14 +170,16 @@ jobs:
           JWT=$(python3 scripts/gen_asc_jwt.py "$KEY_PATH" "$KEY_ID" "$ISSUER_ID")
           echo "JWT generated (${#JWT} chars)"
 
-          # Note: --http1.1 is required to bypass a curl HTTP/2 + --fail bug
-          # (curl #13411) where ASC's HTTP 401 surfaces as exit code 56
-          # instead of the correct exit code 22.
+          # ASC JSON:API uses filter[x] and fields[x] query params. Square
+          # brackets are RFC 3986 gen-delims — not valid unencoded in query
+          # strings under strict HTTP parsing. Percent-encode them so both
+          # HTTP/1.1 and HTTP/2 endpoints accept the request without 400.
+          # -S shows curl errors even in silent mode; -f fails on 4xx/5xx.
 
           # ── Find app by bundle ID ───────────────────────────────────────
-          APP_RESP=$(curl -gsSf --http1.1 \
+          APP_RESP=$(curl -sSf \
             -H "Authorization: Bearer $JWT" \
-            "https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=com.whisperticket.app&fields[apps]=id,name")
+            "https://api.appstoreconnect.apple.com/v1/apps?filter%5BbundleId%5D=com.whisperticket.app&fields%5Bapps%5D=id,name")
           APP_ID=$(echo "$APP_RESP" | python3 -c \
             "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
           echo "App ID: $APP_ID"
@@ -185,9 +187,9 @@ jobs:
           # ── Wait for build to appear (up to 3 min, checks every 20s) ───
           BUILD_ID=""
           for i in $(seq 1 9); do
-            BUILD_RESP=$(curl -gsSf --http1.1 \
+            BUILD_RESP=$(curl -sSf \
               -H "Authorization: Bearer $JWT" \
-              "https://api.appstoreconnect.apple.com/v1/builds?filter[app]=$APP_ID&filter[version]=$BUILD_NUMBER&sort=-uploadedDate&limit=1&fields[builds]=id,processingState,usesNonExemptEncryption" \
+              "https://api.appstoreconnect.apple.com/v1/builds?filter%5Bapp%5D=$APP_ID&filter%5Bversion%5D=$BUILD_NUMBER&sort=-uploadedDate&limit=1&fields%5Bbuilds%5D=id,processingState,usesNonExemptEncryption" \
               || echo '{"data":[]}')
             BUILD_ID=$(echo "$BUILD_RESP" | python3 -c \
               "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'] if d['data'] else '')" 2>/dev/null || echo "")
@@ -205,7 +207,7 @@ jobs:
           fi
 
           # ── Set usesNonExemptEncryption = false ─────────────────────────
-          PATCH_RESP=$(curl -gsSf --http1.1 -X PATCH \
+          PATCH_RESP=$(curl -sSf -X PATCH \
             -H "Authorization: Bearer $JWT" \
             -H "Content-Type: application/json" \
             -d "{\"data\":{\"type\":\"builds\",\"id\":\"$BUILD_ID\",\"attributes\":{\"usesNonExemptEncryption\":false}}}" \
@@ -214,9 +216,9 @@ jobs:
             "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('attributes',{}).get('usesNonExemptEncryption','(no response)'))" 2>/dev/null || echo 'done')"
 
           # ── Find internal beta groups ────────────────────────────────────
-          GROUPS_RESP=$(curl -gsSf --http1.1 \
+          GROUPS_RESP=$(curl -sSf \
             -H "Authorization: Bearer $JWT" \
-            "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/betaGroups?filter[isInternalGroup]=true&fields[betaGroups]=id,name")
+            "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/betaGroups?filter%5BisInternalGroup%5D=true&fields%5BbetaGroups%5D=id,name")
           GROUPS=$(echo "$GROUPS_RESP" | python3 -c \
             "import sys,json; d=json.load(sys.stdin); [print(g['id']+'|'+g['attributes']['name']) for g in d['data']]" 2>/dev/null || echo "")
 
@@ -228,7 +230,7 @@ jobs:
           # ── Add build to each internal group ────────────────────────────
           while IFS='|' read -r GROUP_ID GROUP_NAME; do
             echo "Adding build to group: $GROUP_NAME ($GROUP_ID)"
-            curl -gsSf --http1.1 -X POST \
+            curl -sSf -X POST \
               -H "Authorization: Bearer $JWT" \
               -H "Content-Type: application/json" \
               -d "{\"data\":[{\"type\":\"builds\",\"id\":\"$BUILD_ID\"}]}" \
