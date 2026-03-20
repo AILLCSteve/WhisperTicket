@@ -93,7 +93,7 @@ struct FloorPlanEditorView: View {
     private var listEditor: some View {
         List {
             let plan = services.floorPlanStore.floorPlan
-            ForEach(plan.tables) { table in
+            ForEach(plan.tables, id: \.id) { table in
                 let section = plan.sections.first { $0.tableIds.contains(table.id) }
                 HStack(spacing: 12) {
                     if let section {
@@ -109,7 +109,7 @@ struct FloorPlanEditorView: View {
                     Spacer()
                     Button { editingTable = table } label: {
                         Image(systemName: "pencil.circle")
-                            .foregroundStyle(.accentColor)
+                            .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.plain)
                 }

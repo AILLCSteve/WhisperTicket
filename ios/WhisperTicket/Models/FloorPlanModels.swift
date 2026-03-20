@@ -26,7 +26,9 @@ struct FloorPlan: Codable {
     }
 }
 
-struct FloorTable: Codable, Identifiable {
+struct FloorTable: Codable, Identifiable, Hashable {
+    static func == (lhs: FloorTable, rhs: FloorTable) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
     var id: String = UUID().uuidString
     var name: String                    // "1", "Bar", "Patio 2"
     var position: CGSize                // drag offset from canvas origin
@@ -63,19 +65,6 @@ struct ServerSection: Codable, Identifiable {
         "4A90D9", "E67E22", "27AE60", "8E44AD",
         "E74C3C", "16A085", "F39C12", "2C3E50"
     ]
-}
-
-// MARK: - CGSize Codable support
-
-extension CGSize: @retroactive Codable {
-    public init(from decoder: Decoder) throws {
-        var c = try decoder.unkeyedContainer()
-        self.init(width: try c.decode(CGFloat.self), height: try c.decode(CGFloat.self))
-    }
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.unkeyedContainer()
-        try c.encode(width); try c.encode(height)
-    }
 }
 
 // MARK: - Color hex helper

@@ -162,7 +162,7 @@ struct TableOrderEntryView: View {
                         HStack {
                             Label(label, systemImage: isActive ? "person.fill" : "person")
                                 .font(.subheadline.bold())
-                                .foregroundStyle(isActive ? .accentColor : .primary)
+                                .foregroundStyle(isActive ? Color.accentColor : Color.primary)
                             Spacer()
                             Button {
                                 activeSeatIndex = max(0, group.seatNumber - 1)
@@ -214,7 +214,7 @@ struct TableOrderEntryView: View {
             HStack {
                 Label("Recording for: \(seatLabel)", systemImage: "mic.fill")
                     .font(.subheadline.bold())
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
                 Spacer()
                 if vm.isFinalizingTranscription {
                     ProgressView()
