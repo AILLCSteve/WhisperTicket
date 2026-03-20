@@ -213,11 +213,24 @@ jobs:
             "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('attributes',{}).get('usesNonExemptEncryption','(no response)'))" 2>/dev/null || echo 'done')"
 
           # ── Find internal beta groups ────────────────────────────────────
-          GROUPS_RESP=$(curl -sSf \
+          # Use --http1.1 + -o/-w (no -f) to capture the real response body and
+          # HTTP status. HTTP/2 + -f masks 4xx errors as exit 56 (curl bug #13411).
+          GROUPS_HTTP=$(curl -s --http1.1 \
             -H "Authorization: Bearer $JWT" \
-            "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/betaGroups?filter%5BisInternalGroup%5D=true&fields%5BbetaGroups%5D=name")
-          GROUPS=$(echo "$GROUPS_RESP" | python3 -c \
-            "import sys,json; d=json.load(sys.stdin); [print(g['id']+'|'+g['attributes']['name']) for g in d['data']]" 2>/dev/null || echo "")
+            -o /tmp/betagroups_resp.json \
+            -w "%{http_code}" \
+            "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/betaGroups?filter%5BisInternalGroup%5D=true&fields%5BbetaGroups%5D=name" \
+            || echo "000")
+          echo "=== betaGroups HTTP $GROUPS_HTTP ==="
+          cat /tmp/betagroups_resp.json 2>/dev/null || echo "(no response body)"
+
+          if [ "$GROUPS_HTTP" != "200" ]; then
+            echo "⚠️ betaGroups API returned HTTP $GROUPS_HTTP — build is in TestFlight; add to groups manually or enable Automatic Distribution in ASC."
+            exit 0
+          fi
+
+          GROUPS=$(python3 -c \
+            "import sys,json; f=open('/tmp/betagroups_resp.json'); d=json.load(f); [print(g['id']+'|'+g['attributes']['name']) for g in d['data']]" 2>/dev/null || echo "")
 
           if [ -z "$GROUPS" ]; then
             echo "⚠️ No internal beta groups found — add testers manually in ASC once, then enable Automatic Distribution."
