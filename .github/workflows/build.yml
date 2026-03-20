@@ -172,25 +172,11 @@ jobs:
           PAYLOAD=$(printf '{"iss":"%s","iat":%d,"exp":%d,"aud":"appstoreconnect-v1"}' \
             "$ISSUER_ID" "$NOW" "$EXP" \
             | openssl base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
-          # openssl dgst -sign produces DER-encoded ECDSA; JWT ES256 requires
-          # raw R||S (32-byte big-endian R concatenated with 32-byte S).
-          # Python converts DER → R||S without needing any external packages.
+          # openssl dgst -sign → DER-encoded ECDSA; JWT ES256 needs raw R||S.
+          # One-liner avoids multiline indentation issues in YAML.
           SIG=$(printf '%s.%s' "$HEADER" "$PAYLOAD" \
             | openssl dgst -binary -sha256 -sign "$KEY_PATH" \
-            | python3 -c "
-import sys, base64
-der = sys.stdin.buffer.read()
-i = 2  # skip 0x30 <total_len>
-assert der[i] == 0x02
-rlen = der[i+1]; i += 2
-r = der[i:i+rlen]; i += rlen
-assert der[i] == 0x02
-slen = der[i+1]; i += 2
-s = der[i:i+slen]
-r = r.lstrip(b'\x00').rjust(32, b'\x00')[-32:]
-s = s.lstrip(b'\x00').rjust(32, b'\x00')[-32:]
-print(base64.urlsafe_b64encode(r + s).rstrip(b'=').decode())
-")
+            | python3 -c 'import sys,base64;d=sys.stdin.buffer.read();i=2;rl=d[i+1];i+=2;r=d[i:i+rl];i+=rl;sl=d[i+1];i+=2;s=d[i:i+sl];r=r.lstrip(b"\x00").rjust(32,b"\x00")[-32:];s=s.lstrip(b"\x00").rjust(32,b"\x00")[-32:];print(base64.urlsafe_b64encode(r+s).rstrip(b"=").decode())')
           JWT="${HEADER}.${PAYLOAD}.${SIG}"
 
           # ── Find app by bundle ID ───────────────────────────────────────
