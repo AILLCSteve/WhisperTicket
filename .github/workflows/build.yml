@@ -99,7 +99,7 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
-            MARKETING_VERSION="1.3.0" \
+            MARKETING_VERSION="1.3.1" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             2>&1 | tee build.log
 
@@ -147,6 +147,92 @@ jobs:
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
             2>&1 | tee -a build.log
+
+      # ── Set compliance + distribute to internal group via ASC API ───────────
+      - name: Set compliance & distribute to internal testers
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          KEY_PATH=~/.private_keys/AuthKey_${KEY_ID}.p8
+          BUILD_NUMBER="${{ github.run_number }}"
+
+          # ── Generate JWT (ES256, 20-minute expiry) ──────────────────────
+          NOW=$(date +%s)
+          EXP=$((NOW + 1200))
+          HEADER=$(printf '{"alg":"ES256","kid":"%s","typ":"JWT"}' "$KEY_ID" \
+            | openssl base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+          PAYLOAD=$(printf '{"iss":"%s","iat":%d,"exp":%d,"aud":"appstoreconnect-v1"}' \
+            "$ISSUER_ID" "$NOW" "$EXP" \
+            | openssl base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+          SIG=$(printf '%s.%s' "$HEADER" "$PAYLOAD" \
+            | openssl dgst -binary -sha256 -sign "$KEY_PATH" \
+            | openssl base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+          JWT="${HEADER}.${PAYLOAD}.${SIG}"
+
+          # ── Find app by bundle ID ───────────────────────────────────────
+          APP_RESP=$(curl -sf \
+            -H "Authorization: Bearer $JWT" \
+            "https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=com.whisperticket.app&fields[apps]=id,name")
+          APP_ID=$(echo "$APP_RESP" | python3 -c \
+            "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
+          echo "App ID: $APP_ID"
+
+          # ── Wait for build to appear (up to 3 min, checks every 20s) ───
+          BUILD_ID=""
+          for i in $(seq 1 9); do
+            BUILD_RESP=$(curl -sf \
+              -H "Authorization: Bearer $JWT" \
+              "https://api.appstoreconnect.apple.com/v1/builds?filter[app]=$APP_ID&filter[version]=$BUILD_NUMBER&sort=-uploadedDate&limit=1&fields[builds]=id,processingState,usesNonExemptEncryption" \
+              || echo '{"data":[]}')
+            BUILD_ID=$(echo "$BUILD_RESP" | python3 -c \
+              "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'] if d['data'] else '')" 2>/dev/null || echo "")
+            if [ -n "$BUILD_ID" ]; then
+              echo "Build found: $BUILD_ID"
+              break
+            fi
+            echo "Waiting for build $BUILD_NUMBER to appear in ASC (attempt $i/9)..."
+            sleep 20
+          done
+
+          if [ -z "$BUILD_ID" ]; then
+            echo "⚠️ Build not yet visible in ASC — compliance already set via Info.plist; skipping API distribute."
+            exit 0
+          fi
+
+          # ── Set usesNonExemptEncryption = false ─────────────────────────
+          PATCH_RESP=$(curl -sf -X PATCH \
+            -H "Authorization: Bearer $JWT" \
+            -H "Content-Type: application/json" \
+            -d "{\"data\":{\"type\":\"builds\",\"id\":\"$BUILD_ID\",\"attributes\":{\"usesNonExemptEncryption\":false}}}" \
+            "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID" || echo '{}')
+          echo "Compliance set: $(echo "$PATCH_RESP" | python3 -c \
+            "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('attributes',{}).get('usesNonExemptEncryption','(no response)'))" 2>/dev/null || echo 'done')"
+
+          # ── Find internal beta groups ────────────────────────────────────
+          GROUPS_RESP=$(curl -sf \
+            -H "Authorization: Bearer $JWT" \
+            "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/betaGroups?filter[isInternalGroup]=true&fields[betaGroups]=id,name")
+          GROUPS=$(echo "$GROUPS_RESP" | python3 -c \
+            "import sys,json; d=json.load(sys.stdin); [print(g['id']+'|'+g['attributes']['name']) for g in d['data']]" 2>/dev/null || echo "")
+
+          if [ -z "$GROUPS" ]; then
+            echo "⚠️ No internal beta groups found — add testers manually in ASC once, then enable Automatic Distribution."
+            exit 0
+          fi
+
+          # ── Add build to each internal group ────────────────────────────
+          while IFS='|' read -r GROUP_ID GROUP_NAME; do
+            echo "Adding build to group: $GROUP_NAME ($GROUP_ID)"
+            curl -sf -X POST \
+              -H "Authorization: Bearer $JWT" \
+              -H "Content-Type: application/json" \
+              -d "{\"data\":[{\"type\":\"builds\",\"id\":\"$BUILD_ID\"}]}" \
+              "https://api.appstoreconnect.apple.com/v1/betaGroups/$GROUP_ID/relationships/builds" \
+              && echo "  ✓ Added" || echo "  ⚠️ Already in group or error (non-fatal)"
+          done <<< "$GROUPS"
 
       # ── Export only (PR builds) ────────────────────────────────────────────
       - name: Export IPA (PR builds)

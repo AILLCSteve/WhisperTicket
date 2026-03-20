@@ -26,6 +26,7 @@ targets:
           UIColorName: ""
         NSMicrophoneUsageDescription: "WhisperTicket needs your microphone to capture voice orders."
         NSSpeechRecognitionUsageDescription: "WhisperTicket transcribes orders on-device to build tickets."
+        ITSAppUsesNonExemptEncryption: false
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
@@ -43,7 +44,7 @@ targets:
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TARGETED_DEVICE_FAMILY: "1,2"
-        MARKETING_VERSION: "1.3.0"
+        MARKETING_VERSION: "1.3.1"
         CURRENT_PROJECT_VERSION: "2"
         DEVELOPMENT_TEAM: "M37X5J35F8"
         CODE_SIGN_STYLE: Automatic
