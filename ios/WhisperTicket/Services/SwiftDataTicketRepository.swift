@@ -35,6 +35,12 @@ final class SwiftDataTicketRepository: TicketRepositoryProtocol {
         try modelContext.save()
     }
 
+    func deleteAll() async throws {
+        let tickets = try modelContext.fetch(FetchDescriptor<Ticket>())
+        for ticket in tickets { modelContext.delete(ticket) }
+        try modelContext.save()
+    }
+
     func createTicket(from draft: TicketDraft, serverId: String) async throws -> Ticket {
         let ticket = Ticket(
             tableNumber: draft.tableNumber,

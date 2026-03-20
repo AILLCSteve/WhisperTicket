@@ -5,30 +5,66 @@ struct TicketEditorView: View {
     @Environment(\.appServices) var services
     @State private var vm: TicketEditorViewModel?
     @State private var showSeatMap = false
+    @State private var editingTranscript = false
+    @State private var transcriptText = ""
 
     var body: some View {
         if let vm {
             List {
-                // Header
+                // ── Transcript ─────────────────────────────────────────────
                 Section {
+                    if ticket.rawTranscript.isEmpty {
+                        Text("No transcript recorded")
+                            .foregroundStyle(.secondary)
+                            .italic()
+                    } else {
+                        Text(ticket.rawTranscript)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if ticket.ticketStatus != .closed {
+                        Button {
+                            transcriptText = ticket.rawTranscript
+                            editingTranscript = true
+                        } label: {
+                            Label("Edit Transcript", systemImage: "pencil")
+                                .font(.caption)
+                        }
+                    }
+                } header: {
+                    Label("Voice Transcript", systemImage: "mic.fill")
+                }
+
+                // ── Ticket Info ────────────────────────────────────────────
+                Section("Ticket Info") {
                     LabeledContent("Table", value: ticket.tableNumber)
-                    LabeledContent("Opened", value: ticket.openedAt.formatted(.dateTime.hour().minute()))
                     LabeledContent("Status", value: ticket.ticketStatus.rawValue.capitalized)
-                    if let timeToSend = ticket.timeToSend {
-                        LabeledContent("Time to Send", value: formatInterval(timeToSend))
-                    }
-                    if let timeToDeliver = ticket.timeToDeliver {
-                        LabeledContent("Time to Deliver", value: formatInterval(timeToDeliver))
-                    }
-                    if let totalTime = ticket.totalTime {
-                        LabeledContent("Total Time", value: formatInterval(totalTime))
-                    }
+                    LabeledContent("Opened", value: ticket.openedAt.formatted(.dateTime.hour().minute().month().day()))
                     if ticket.ticketStatus == .open || ticket.ticketStatus == .sent {
                         ElapsedTimeLabel(since: ticket.openedAt)
                     }
                 }
 
-                // Medium complexity: Course pacing
+                // ── Timeline ───────────────────────────────────────────────
+                Section("Timeline") {
+                    TimelineRow(label: "Opened", date: ticket.openedAt, color: .blue)
+                    if let sent = ticket.sentToKitchenAt {
+                        TimelineRow(label: "Sent to Kitchen", date: sent, color: .orange,
+                                    delta: ticket.timeToSend.map { formatInterval($0) })
+                    }
+                    if let delivered = ticket.deliveredAt {
+                        TimelineRow(label: "Delivered", date: delivered, color: .green,
+                                    delta: ticket.timeToDeliver.map { formatInterval($0) })
+                    }
+                    if let closed = ticket.closedAt {
+                        TimelineRow(label: "Closed", date: closed, color: .secondary,
+                                    delta: ticket.totalTime.map { "Total: " + formatInterval($0) })
+                    }
+                }
+
+                // ── Course Pacing ──────────────────────────────────────────
                 let courses = Set(ticket.allItems.map { $0.courseFlag })
                 if !courses.isEmpty {
                     Section("Course Pacing") {
@@ -43,54 +79,72 @@ struct TicketEditorView: View {
                     }
                 }
 
-                // Items by seat
-                ForEach(ticket.guests.sorted(by: { $0.seatNumber < $1.seatNumber })) { seat in
-                    Section("Seat \(seat.seatNumber)") {
-                        ForEach(seat.items) { item in
-                            TicketItemRow(
-                                item: item,
-                                onConfirmAllergy: { Task { await vm.confirmAllergyItem(item) } },
-                                onUpdateNotes: { notes in Task { await vm.updateItemNotes(item, notes: notes) } },
-                                onMoveSeat: { toSeat in Task { await vm.moveItem(item, fromSeat: seat, toSeatNumber: toSeat) } },
-                                seatCount: ticket.guests.count
-                            )
-                        }
-                        .onDelete { offsets in
-                            let items = offsets.map { seat.items[$0] }
-                            for item in items { Task { await vm.removeItem(item, from: seat) } }
+                // ── Items by Seat ──────────────────────────────────────────
+                if ticket.guests.isEmpty || ticket.allItems.isEmpty {
+                    Section("Order Items") {
+                        Text("No items — order was entered as transcript only")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                } else {
+                    ForEach(ticket.guests.sorted(by: { $0.seatNumber < $1.seatNumber })) { seat in
+                        Section("Seat \(seat.seatNumber)") {
+                            ForEach(seat.items) { item in
+                                TicketItemRow(
+                                    item: item,
+                                    onConfirmAllergy: { Task { await vm.confirmAllergyItem(item) } },
+                                    onUpdateNotes: { notes in Task { await vm.updateItemNotes(item, notes: notes) } },
+                                    onMoveSeat: { toSeat in Task { await vm.moveItem(item, fromSeat: seat, toSeatNumber: toSeat) } },
+                                    seatCount: ticket.guests.count
+                                )
+                            }
+                            .onDelete { offsets in
+                                let items = offsets.map { seat.items[$0] }
+                                for item in items { Task { await vm.removeItem(item, from: seat) } }
+                            }
                         }
                     }
                 }
 
-                // Notes
+                // ── Notes ──────────────────────────────────────────────────
                 if !ticket.notes.isEmpty {
                     Section("Notes") { Text(ticket.notes) }
                 }
 
-                // Actions
-                Section {
-                    Button("Send to Kitchen") { Task { await vm.sendToKitchen() } }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(ticket.ticketStatus != .open)
+                // ── Actions ────────────────────────────────────────────────
+                if ticket.ticketStatus != .closed {
+                    Section("Actions") {
+                        Button("Send to Kitchen") { Task { await vm.sendToKitchen() } }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(ticket.ticketStatus != .open)
 
-                    Button("Mark Delivered") { Task { await vm.markDelivered() } }
-                        .disabled(ticket.ticketStatus != .sent)
+                        Button("Mark Delivered") { Task { await vm.markDelivered() } }
+                            .disabled(ticket.ticketStatus != .sent)
 
-                    Button("Close Ticket") { Task { await vm.closeTicket() } }
-                        .foregroundStyle(.red)
-                        .disabled(ticket.ticketStatus != .delivered)
+                        Button("Close Ticket") { Task { await vm.closeTicket() } }
+                            .foregroundStyle(.red)
+                            .disabled(ticket.ticketStatus != .delivered)
+                    }
                 }
 
-                // Medium complexity: seat map
-                Section {
-                    Button("View Seat Map") { showSeatMap = true }
-                        .foregroundStyle(.blue)
+                // ── Seat Map ───────────────────────────────────────────────
+                if !ticket.guests.isEmpty {
+                    Section {
+                        Button("View Seat Map") { showSeatMap = true }
+                            .foregroundStyle(.blue)
+                    }
                 }
             }
-            .navigationTitle("Ticket — Table \(ticket.tableNumber)")
+            .navigationTitle("Table \(ticket.tableNumber)")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showSeatMap) {
                 SeatMapView(ticket: ticket, vm: vm)
+            }
+            .sheet(isPresented: $editingTranscript) {
+                TranscriptEditorSheet(text: $transcriptText) {
+                    Task { await vm.updateTranscript(transcriptText) }
+                    editingTranscript = false
+                }
             }
         } else {
             ProgressView()
@@ -102,6 +156,59 @@ struct TicketEditorView: View {
 
     private func formatInterval(_ interval: TimeInterval) -> String {
         "\(Int(interval / 60))m \(Int(interval) % 60)s"
+    }
+}
+
+// MARK: - Transcript Editor Sheet
+
+struct TranscriptEditorSheet: View {
+    @Binding var text: String
+    let onSave: () -> Void
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $text)
+                .padding()
+                .navigationTitle("Edit Transcript")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") { onSave() }
+                    }
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                }
+        }
+    }
+}
+
+// MARK: - Timeline Row
+
+struct TimelineRow: View {
+    let label: String
+    let date: Date
+    let color: Color
+    var delta: String? = nil
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).fontWeight(.medium)
+                Text(date.formatted(.dateTime.hour().minute().month().day()))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let delta {
+                Text(delta)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -120,7 +227,6 @@ struct TicketItemRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("\(item.quantity)x \(item.name)").fontWeight(.medium)
-                // Low complexity: abbreviation
                 Text("[\(item.ticketAbbreviation)]")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -209,7 +315,7 @@ struct ElapsedTimeLabel: View {
     }
 }
 
-// MARK: - Course Control Row (Medium Complexity)
+// MARK: - Course Control Row
 
 struct CourseControlRow: View {
     let course: CourseFlag

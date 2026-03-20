@@ -25,4 +25,9 @@ final class TicketsListViewModel {
         try? await repository.delete(ticket)
         await loadTickets()
     }
+
+    func clearAll() async {
+        try? await repository.deleteAll()
+        await loadTickets()
+    }
 }

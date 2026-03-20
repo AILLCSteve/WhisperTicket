@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct MenuAdminView: View {
     @Environment(\.appServices) var services
+    @State private var currentMenu: MenuV1? = nil
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showImportPicker = false
@@ -12,10 +13,9 @@ struct MenuAdminView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if let menu = services.menuStore.menu {
+                if let menu = currentMenu {
                     List {
                         Section("Restaurant") {
-                            LabeledContent("ID", value: menu.restaurantId)
                             LabeledContent("Version", value: "\(menu.version)")
                             LabeledContent("Categories", value: "\(menu.categories.count)")
                             LabeledContent("Total Items", value: "\(menu.categories.flatMap { $0.items }.count)")
@@ -57,16 +57,9 @@ struct MenuAdminView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Reload") {
-                        Task {
-                            isLoading = true
-                            do {
-                                try await services.menuStore.loadMenu()
-                            } catch {
-                                errorMessage = error.localizedDescription
-                            }
-                            isLoading = false
-                        }
+                        Task { await loadMenu() }
                     }
+                    .disabled(isLoading)
                 }
                 ToolbarItem(placement: .secondaryAction) {
                     Button {
@@ -76,6 +69,12 @@ struct MenuAdminView: View {
                     }
                     .disabled(isImporting)
                 }
+            }
+            .task {
+                // Show whatever is already in the store (loaded at app startup)
+                currentMenu = services.menuStore.menu
+                // If not yet loaded, trigger a load
+                if currentMenu == nil { await loadMenu() }
             }
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -99,7 +98,6 @@ struct MenuAdminView: View {
                         let outcome = await services.menuImporter.importMenu(from: url, fileType: fileType)
                         switch outcome {
                         case .success(let menu):
-                            // Phase 2: save to menuStore and reload
                             importResult = "Imported: \(menu.categories.count) categories, \(menu.categories.flatMap { $0.items }.count) items"
                         case .failure(let message):
                             importResult = message
@@ -119,5 +117,16 @@ struct MenuAdminView: View {
                 Text(importResult ?? "")
             }
         }
+    }
+
+    private func loadMenu() async {
+        isLoading = true
+        do {
+            try await services.menuStore.loadMenu()
+            currentMenu = services.menuStore.menu
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
     }
 }

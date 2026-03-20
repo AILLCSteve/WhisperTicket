@@ -3,6 +3,7 @@ import SwiftUI
 struct TicketsListView: View {
     @Environment(\.appServices) var services
     @State private var vm: TicketsListViewModel?
+    @State private var showClearConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -15,6 +16,10 @@ struct TicketsListView: View {
                                     NavigationLink(destination: TicketEditorView(ticket: ticket)) {
                                         TicketRow(ticket: ticket)
                                     }
+                                }
+                                .onDelete { offsets in
+                                    let tickets = offsets.map { vm.openTickets[$0] }
+                                    for t in tickets { Task { await vm.deleteTicket(t) } }
                                 }
                             } header: {
                                 Label("Open", systemImage: "circle.fill")
@@ -48,8 +53,27 @@ struct TicketsListView: View {
                         }
                     }
                     .refreshable { await vm.loadTickets() }
-                    // Refresh every time the tab appears so newly-created tickets show immediately
                     .onAppear { Task { await vm.loadTickets() } }
+                    .toolbar {
+                        ToolbarItem(placement: .destructiveAction) {
+                            if !vm.openTickets.isEmpty || !vm.completedTickets.isEmpty {
+                                Button("Clear All", role: .destructive) {
+                                    showClearConfirm = true
+                                }
+                            }
+                        }
+                    }
+                    .confirmationDialog(
+                        "Clear all tickets?",
+                        isPresented: $showClearConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete All Tickets", role: .destructive) {
+                            Task { await vm.clearAll() }
+                        }
+                    } message: {
+                        Text("This permanently deletes all open and completed tickets.")
+                    }
                 } else {
                     ProgressView()
                 }
@@ -82,6 +106,12 @@ struct TicketRow: View {
                       systemImage: "list.bullet")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if !ticket.rawTranscript.isEmpty {
+                    Label("Transcript", systemImage: "mic.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if ticket.ticketStatus == .open || ticket.ticketStatus == .sent {
                     Label(formatElapsed(elapsed), systemImage: "clock")

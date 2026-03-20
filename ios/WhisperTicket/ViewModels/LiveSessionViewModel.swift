@@ -83,7 +83,12 @@ final class LiveSessionViewModel {
     }
 
     func triggerRepeatBack() {
-        repeatBackText = parser.repeatBackSummary(for: draft)
+        let summary = parser.repeatBackSummary(for: draft)
+        if summary.isEmpty && !draft.rawTranscript.isEmpty {
+            repeatBackText = "Transcript:\n\n\(draft.rawTranscript)"
+        } else {
+            repeatBackText = summary
+        }
         showRepeatBack = true
     }
 

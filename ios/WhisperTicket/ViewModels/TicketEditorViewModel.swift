@@ -59,6 +59,11 @@ final class TicketEditorViewModel {
         }
     }
 
+    func updateTranscript(_ text: String) async {
+        ticket.rawTranscript = text
+        await save()
+    }
+
     func updateItemNotes(_ item: TicketItem, notes: String) async {
         item.notes = notes
         await save()

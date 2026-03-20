@@ -7,7 +7,6 @@ struct WelcomeView: View {
 
     @State private var openCount = 0
     @State private var inKitchenCount = 0
-    @State private var restaurantName = "Applebee's"
     @State private var currentTime = Date()
 
     private let clockTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -32,15 +31,9 @@ struct WelcomeView: View {
                         .foregroundStyle(.orange)
                         .shadow(color: .orange.opacity(0.4), radius: 20)
 
-                    Text("WaitTicket")
+                    Text("WhisperTicket")
                         .font(.system(size: 42, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
-
-                    Text(restaurantName)
-                        .font(.title3)
-                        .foregroundStyle(.white.opacity(0.6))
-                        .textCase(.uppercase)
-                        .tracking(3)
                 }
 
                 Spacer()
@@ -114,11 +107,6 @@ struct WelcomeView: View {
     }
 
     private func loadStats() async {
-        if let menu = services.menuStore.menu {
-            restaurantName = menu.restaurantId
-                .replacingOccurrences(of: "_", with: " ")
-                .capitalized
-        }
         if let tickets = try? await services.repository.fetchAll() {
             openCount = tickets.filter { $0.ticketStatus == .open }.count
             inKitchenCount = tickets.filter { $0.ticketStatus == .sent }.count

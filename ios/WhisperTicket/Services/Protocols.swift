@@ -49,7 +49,8 @@ protocol TicketRepositoryProtocol {
     func fetchOpen() async throws -> [Ticket]
     func save(_ ticket: Ticket) async throws
     func delete(_ ticket: Ticket) async throws
-    func deleteItem(_ item: TicketItem) async throws      // NEW
+    func deleteItem(_ item: TicketItem) async throws
+    func deleteAll() async throws
     func createTicket(from draft: TicketDraft, serverId: String) async throws -> Ticket
 }
 

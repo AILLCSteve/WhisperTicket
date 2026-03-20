@@ -118,7 +118,7 @@ struct LiveSessionView: View {
                             }
                             .buttonStyle(.bordered)
                             .tint(.green)
-                            .disabled(vm.draft.items.isEmpty)
+                            .disabled(vm.transcript.isEmpty && vm.draft.items.isEmpty)
 
                             // Hold-to-talk
                             HoldToTalkButton(isRecording: vm.isRecording) {
