@@ -58,7 +58,7 @@ final class TicketEditorViewModel {
     func removeItem(_ item: TicketItem, from seat: GuestSeat) async {
         seat.items.removeAll { $0.id == item.id }
         logEdit(type: "item_removed", seatNumber: seat.seatNumber,
-                summary: "Removed "\(item.name)" from Seat \(seat.seatNumber)")
+                summary: "Removed \"\(item.name)\" from Seat \(seat.seatNumber)")
         do {
             try await repository.deleteItem(item)
         } catch {
@@ -81,7 +81,7 @@ final class TicketEditorViewModel {
 
     func updateItemNotes(_ item: TicketItem, notes: String) async {
         item.notes = notes
-        logEdit(type: "notes_updated", summary: "Updated note on "\(item.name)"")
+        logEdit(type: "notes_updated", summary: "Updated note on \"\(item.name)\"")
         await save()
     }
 
@@ -100,7 +100,7 @@ final class TicketEditorViewModel {
             ticket.guests.append(newSeat)
         }
         logEdit(type: "item_moved", seatNumber: fromSeat.seatNumber,
-                summary: "Moved "\(item.name)" from Seat \(fromSeat.seatNumber) → Seat \(toSeatNumber)")
+                summary: "Moved \"\(item.name)\" from Seat \(fromSeat.seatNumber) → Seat \(toSeatNumber)")
         await save()
     }
 
