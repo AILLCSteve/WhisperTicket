@@ -50,9 +50,8 @@ struct WhisperTicketApp: App {
                     SFSpeechTranscriptionService.requestPermission { granted in
                         if !granted { print("⚠️ Speech recognition not authorized") }
                     }
-                    AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                        if !granted { print("⚠️ Microphone not authorized") }
-                    }
+                    let micGranted = await AVAudioApplication.requestRecordPermission()
+                    if !micGranted { print("⚠️ Microphone not authorized") }
                     do {
                         try await menuStore.loadMenu()
                     } catch {

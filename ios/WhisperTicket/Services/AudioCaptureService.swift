@@ -11,7 +11,7 @@ final class AudioCaptureService: AudioCaptureServiceProtocol {
 
     func startCapture() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth])
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try session.setActive(true)
 
         let inputNode = audioEngine.inputNode

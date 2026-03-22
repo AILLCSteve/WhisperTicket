@@ -13,172 +13,15 @@ struct TicketEditorView: View {
     var body: some View {
         if let vm {
             List {
-                // ── Transcript ─────────────────────────────────────────────
-                Section {
-                    if ticket.rawTranscript.isEmpty {
-                        Text("No transcript recorded")
-                            .foregroundStyle(.secondary)
-                            .italic()
-                    } else {
-                        Text(ticket.rawTranscript)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    if ticket.ticketStatus != .closed {
-                        Button {
-                            transcriptText = ticket.rawTranscript
-                            editingTranscript = true
-                        } label: {
-                            Label("Edit Transcript", systemImage: "pencil")
-                                .font(.caption)
-                        }
-                    }
-                } header: {
-                    Label("Voice Transcript", systemImage: "mic.fill")
-                }
-
-                // ── Ticket Info ────────────────────────────────────────────
-                Section("Ticket Info") {
-                    LabeledContent("Table", value: ticket.tableNumber)
-                    LabeledContent("Status", value: ticket.ticketStatus.rawValue.capitalized)
-                    LabeledContent("Opened", value: ticket.openedAt.formatted(.dateTime.hour().minute().month().day()))
-                    if ticket.ticketStatus == .open || ticket.ticketStatus == .sent {
-                        ElapsedTimeLabel(since: ticket.openedAt)
-                    }
-                }
-
-                // ── Timeline ───────────────────────────────────────────────
-                Section("Timeline") {
-                    TimelineRow(label: "Opened", date: ticket.openedAt, color: .blue)
-                    if let sent = ticket.sentToKitchenAt {
-                        TimelineRow(label: "Sent to Kitchen", date: sent, color: .orange,
-                                    delta: ticket.timeToSend.map { formatInterval($0) })
-                    }
-                    if let delivered = ticket.deliveredAt {
-                        TimelineRow(label: "Delivered", date: delivered, color: .green,
-                                    delta: ticket.timeToDeliver.map { formatInterval($0) })
-                    }
-                    if let closed = ticket.closedAt {
-                        TimelineRow(label: "Closed", date: closed, color: .secondary,
-                                    delta: ticket.totalTime.map { "Total: " + formatInterval($0) })
-                    }
-                }
-
-                // ── Course Pacing ──────────────────────────────────────────
-                let courses = Set(ticket.allItems.map { $0.courseFlag })
-                if !courses.isEmpty {
-                    Section("Course Pacing") {
-                        ForEach(Array(courses).sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { course in
-                            CourseControlRow(
-                                course: course,
-                                state: vm.coursePacingStates[course] ?? .holding,
-                                onFire: { Task { await vm.fireCourse(course) } },
-                                onHold: { Task { await vm.holdCourse(course) } }
-                            )
-                        }
-                    }
-                }
-
-                // ── Items by Seat (with per-seat transcript) ───────────────
-                if ticket.guests.isEmpty || ticket.allItems.isEmpty {
-                    Section("Order Items") {
-                        Text("No items — order was entered as transcript only")
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                    }
-                } else {
-                    ForEach(ticket.guests.sorted(by: { $0.seatNumber < $1.seatNumber })) { seat in
-                        Section(header: Label("Seat \(seat.seatNumber)", systemImage: "person")) {
-                            // Per-seat voice transcript (tappable to edit if ticket not closed)
-                            if !seat.rawTranscript.isEmpty {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Label("Transcript", systemImage: "mic")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.secondary)
-                                    Text(seat.rawTranscript)
-                                        .font(.callout)
-                                        .foregroundStyle(.primary)
-                                }
-                                .padding(.vertical, 4)
-
-                                if ticket.ticketStatus != .closed {
-                                    Button {
-                                        vm.editingSeatTranscript = (seat, seat.rawTranscript)
-                                    } label: {
-                                        Label("Edit Transcript", systemImage: "pencil")
-                                            .font(.caption)
-                                    }
-                                }
-                            }
-
-                            ForEach(seat.items) { item in
-                                TicketItemRow(
-                                    item: item,
-                                    onConfirmAllergy: { Task { await vm.confirmAllergyItem(item) } },
-                                    onUpdateNotes: { notes in Task { await vm.updateItemNotes(item, notes: notes) } },
-                                    onMoveSeat: { toSeat in Task { await vm.moveItem(item, fromSeat: seat, toSeatNumber: toSeat) } },
-                                    seatCount: ticket.guests.count
-                                )
-                            }
-                            .onDelete { offsets in
-                                let items = offsets.map { seat.items[$0] }
-                                for item in items { Task { await vm.removeItem(item, from: seat) } }
-                            }
-                        }
-                    }
-                }
-
-                // ── Notes ──────────────────────────────────────────────────
-                if !ticket.notes.isEmpty {
-                    Section("Notes") { Text(ticket.notes) }
-                }
-
-                // ── Edit History (shown always; full audit trail when closed) ─
-                if !ticket.editHistory.isEmpty {
-                    Section("Edit History") {
-                        ForEach(ticket.editHistory.sorted(by: { $0.timestamp < $1.timestamp })) { event in
-                            HStack(alignment: .top, spacing: 10) {
-                                Image(systemName: editHistoryIcon(event.eventType))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 16)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(event.summary)
-                                        .font(.callout)
-                                    Text(event.timestamp.formatted(.dateTime.hour().minute().second()))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ── Actions ────────────────────────────────────────────────
-                if ticket.ticketStatus != .closed {
-                    Section("Actions") {
-                        Button("Send to Kitchen") { Task { await vm.sendToKitchen() } }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(ticket.ticketStatus != .open)
-
-                        Button("Mark Delivered") { Task { await vm.markDelivered() } }
-                            .disabled(ticket.ticketStatus != .sent)
-
-                        Button("Close Ticket") { Task { await vm.closeTicket() } }
-                            .foregroundStyle(.red)
-                            .disabled(ticket.ticketStatus != .delivered)
-                    }
-                }
-
-                // ── Seat Map ───────────────────────────────────────────────
-                if !ticket.guests.isEmpty {
-                    Section {
-                        Button("View Seat Map") { showSeatMap = true }
-                            .foregroundStyle(.blue)
-                    }
-                }
+                transcriptSection(vm: vm)
+                ticketInfoSection()
+                timelineSection()
+                coursePacingSection(vm: vm)
+                orderItemsSection(vm: vm)
+                notesSection()
+                editHistorySection()
+                actionsSection(vm: vm)
+                seatMapSection()
             }
             .navigationTitle("Table \(ticket.tableNumber)")
             .navigationBarTitleDisplayMode(.inline)
@@ -212,6 +55,193 @@ struct TicketEditorView: View {
                 }
         }
     }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private func transcriptSection(vm: TicketEditorViewModel) -> some View {
+        Section {
+            if ticket.rawTranscript.isEmpty {
+                Text("No transcript recorded")
+                    .foregroundStyle(.secondary)
+                    .italic()
+            } else {
+                Text(ticket.rawTranscript)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if ticket.ticketStatus != .closed {
+                Button {
+                    transcriptText = ticket.rawTranscript
+                    editingTranscript = true
+                } label: {
+                    Label("Edit Transcript", systemImage: "pencil")
+                        .font(.caption)
+                }
+            }
+        } header: {
+            Label("Voice Transcript", systemImage: "mic.fill")
+        }
+    }
+
+    @ViewBuilder
+    private func ticketInfoSection() -> some View {
+        Section("Ticket Info") {
+            LabeledContent("Table", value: ticket.tableNumber)
+            LabeledContent("Status", value: ticket.ticketStatus.rawValue.capitalized)
+            LabeledContent("Opened", value: ticket.openedAt.formatted(.dateTime.hour().minute().month().day()))
+            if ticket.ticketStatus == .open || ticket.ticketStatus == .sent {
+                ElapsedTimeLabel(since: ticket.openedAt)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func timelineSection() -> some View {
+        Section("Timeline") {
+            TimelineRow(label: "Opened", date: ticket.openedAt, color: .blue)
+            if let sent = ticket.sentToKitchenAt {
+                TimelineRow(label: "Sent to Kitchen", date: sent, color: .orange,
+                            delta: ticket.timeToSend.map { formatInterval($0) })
+            }
+            if let delivered = ticket.deliveredAt {
+                TimelineRow(label: "Delivered", date: delivered, color: .green,
+                            delta: ticket.timeToDeliver.map { formatInterval($0) })
+            }
+            if let closed = ticket.closedAt {
+                TimelineRow(label: "Closed", date: closed, color: .secondary,
+                            delta: ticket.totalTime.map { "Total: " + formatInterval($0) })
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func coursePacingSection(vm: TicketEditorViewModel) -> some View {
+        let courses = Set(ticket.allItems.map { $0.courseFlag })
+        if !courses.isEmpty {
+            Section("Course Pacing") {
+                ForEach(Array(courses).sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { course in
+                    CourseControlRow(
+                        course: course,
+                        state: vm.coursePacingStates[course] ?? .holding,
+                        onFire: { Task { await vm.fireCourse(course) } },
+                        onHold: { Task { await vm.holdCourse(course) } }
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func orderItemsSection(vm: TicketEditorViewModel) -> some View {
+        if ticket.guests.isEmpty || ticket.allItems.isEmpty {
+            Section("Order Items") {
+                Text("No items — order was entered as transcript only")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        } else {
+            ForEach(ticket.guests.sorted(by: { $0.seatNumber < $1.seatNumber })) { seat in
+                Section(header: Label("Seat \(seat.seatNumber)", systemImage: "person")) {
+                    if !seat.rawTranscript.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("Transcript", systemImage: "mic")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            Text(seat.rawTranscript)
+                                .font(.callout)
+                                .foregroundStyle(.primary)
+                        }
+                        .padding(.vertical, 4)
+
+                        if ticket.ticketStatus != .closed {
+                            Button {
+                                editingSeatTranscript = (seat, seat.rawTranscript)
+                            } label: {
+                                Label("Edit Transcript", systemImage: "pencil")
+                                    .font(.caption)
+                            }
+                        }
+                    }
+
+                    ForEach(seat.items) { item in
+                        TicketItemRow(
+                            item: item,
+                            onConfirmAllergy: { Task { await vm.confirmAllergyItem(item) } },
+                            onUpdateNotes: { notes in Task { await vm.updateItemNotes(item, notes: notes) } },
+                            onMoveSeat: { toSeat in Task { await vm.moveItem(item, fromSeat: seat, toSeatNumber: toSeat) } },
+                            seatCount: ticket.guests.count
+                        )
+                    }
+                    .onDelete { offsets in
+                        let items = offsets.map { seat.items[$0] }
+                        for item in items { Task { await vm.removeItem(item, from: seat) } }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func notesSection() -> some View {
+        if !ticket.notes.isEmpty {
+            Section("Notes") { Text(ticket.notes) }
+        }
+    }
+
+    @ViewBuilder
+    private func editHistorySection() -> some View {
+        if !ticket.editHistory.isEmpty {
+            Section("Edit History") {
+                ForEach(ticket.editHistory.sorted(by: { $0.timestamp < $1.timestamp })) { event in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: editHistoryIcon(event.eventType))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.summary)
+                                .font(.callout)
+                            Text(event.timestamp.formatted(.dateTime.hour().minute().second()))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actionsSection(vm: TicketEditorViewModel) -> some View {
+        if ticket.ticketStatus != .closed {
+            Section("Actions") {
+                Button("Send to Kitchen") { Task { await vm.sendToKitchen() } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(ticket.ticketStatus != .open)
+
+                Button("Mark Delivered") { Task { await vm.markDelivered() } }
+                    .disabled(ticket.ticketStatus != .sent)
+
+                Button("Close Ticket") { Task { await vm.closeTicket() } }
+                    .foregroundStyle(.red)
+                    .disabled(ticket.ticketStatus != .delivered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func seatMapSection() -> some View {
+        if !ticket.guests.isEmpty {
+            Section {
+                Button("View Seat Map") { showSeatMap = true }
+                    .foregroundStyle(.blue)
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     private func formatInterval(_ interval: TimeInterval) -> String {
         "\(Int(interval / 60))m \(Int(interval) % 60)s"
