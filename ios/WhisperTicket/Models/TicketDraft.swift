@@ -3,14 +3,24 @@ import Foundation
 struct TicketDraft {
     var tableNumber: String
     var items: [DraftItem]
-    var rawTranscript: String
+    var rawTranscript: String      // aggregate (last recorded); kept for compat
+    var seatTranscripts: [Int: String]   // per-seat transcripts: seatNumber → text
     var consumedCursor: Int
 
     init(tableNumber: String) {
         self.tableNumber = tableNumber
         self.items = []
         self.rawTranscript = ""
+        self.seatTranscripts = [:]
         self.consumedCursor = 0
+    }
+
+    /// Combined transcript of all seats, used as the ticket-level rawTranscript.
+    var aggregateTranscript: String {
+        seatTranscripts
+            .sorted { $0.key < $1.key }
+            .map { "Seat \($0.key): \($0.value)" }
+            .joined(separator: "\n")
     }
 
     mutating func addItem(_ item: DraftItem) {

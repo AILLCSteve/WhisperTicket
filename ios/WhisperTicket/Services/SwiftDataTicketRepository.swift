@@ -50,7 +50,8 @@ final class SwiftDataTicketRepository: TicketRepositoryProtocol {
 
         let seatNumbers = Set(draft.items.compactMap { $0.seatNumber })
         if seatNumbers.isEmpty {
-            let seat = GuestSeat(seatNumber: 1)
+            let transcript = draft.seatTranscripts[1] ?? draft.rawTranscript
+            let seat = GuestSeat(seatNumber: 1, rawTranscript: transcript)
             for draftItem in draft.items {
                 let item = buildTicketItem(from: draftItem)
                 seat.items.append(item)
@@ -60,7 +61,8 @@ final class SwiftDataTicketRepository: TicketRepositoryProtocol {
             ticket.guests.append(seat)
         } else {
             for seatNum in seatNumbers.sorted() {
-                let seat = GuestSeat(seatNumber: seatNum)
+                let transcript = draft.seatTranscripts[seatNum] ?? ""
+                let seat = GuestSeat(seatNumber: seatNum, rawTranscript: transcript)
                 let seatItems = draft.items.filter { $0.seatNumber == seatNum }
                 for draftItem in seatItems {
                     let item = buildTicketItem(from: draftItem)
@@ -73,7 +75,6 @@ final class SwiftDataTicketRepository: TicketRepositoryProtocol {
             // Unseated items go to seat 1
             let unseated = draft.items.filter { $0.seatNumber == nil }
             if !unseated.isEmpty {
-                // Reuse seat 1 if it was already created; otherwise create it
                 if let existingSeat1 = ticket.guests.first(where: { $0.seatNumber == 1 }) {
                     for draftItem in unseated {
                         let item = buildTicketItem(from: draftItem)
@@ -81,7 +82,7 @@ final class SwiftDataTicketRepository: TicketRepositoryProtocol {
                         modelContext.insert(item)
                     }
                 } else {
-                    let seat = GuestSeat(seatNumber: 1)
+                    let seat = GuestSeat(seatNumber: 1, rawTranscript: draft.seatTranscripts[1] ?? "")
                     for draftItem in unseated {
                         let item = buildTicketItem(from: draftItem)
                         seat.items.append(item)
@@ -92,6 +93,11 @@ final class SwiftDataTicketRepository: TicketRepositoryProtocol {
                 }
             }
         }
+
+        // Store aggregate transcript at ticket level for quick access / search
+        ticket.rawTranscript = draft.aggregateTranscript.isEmpty
+            ? draft.rawTranscript
+            : draft.aggregateTranscript
 
         modelContext.insert(ticket)
         try modelContext.save()

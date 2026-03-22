@@ -14,9 +14,7 @@ targets:
         excludes:
           - "**/*.json"
     resources:
-      - path: ios/WhisperTicket/Resources
-        excludes:
-          - "*.bak"
+      - path: ios/WhisperTicket/Resources/MenuV1.sample.json
       - path: ios/WhisperTicket/Assets.xcassets
     info:
       path: ios/WhisperTicket/Info.plist
@@ -47,7 +45,7 @@ targets:
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         MARKETING_VERSION: "1.4.0"
-        CURRENT_PROJECT_VERSION: "2"
+        CURRENT_PROJECT_VERSION: "3"
         DEVELOPMENT_TEAM: "M37X5J35F8"
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

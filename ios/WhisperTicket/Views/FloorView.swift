@@ -77,7 +77,7 @@ struct FloorView: View {
                             Image(systemName: "arrow.clockwise")
                         }
                         Button { showEditor = true } label: {
-                            Image(systemName: "pencil.circle")
+                            Label("View/Edit Map", systemImage: "map.fill")
                         }
                     }
                 }

@@ -47,13 +47,13 @@ struct LiveSessionView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             // Live transcript
                             GroupBox("Live Transcript") {
-                                Text(vm.transcript.isEmpty
+                                Text(vm.activeSeatTranscript.isEmpty
                                      ? "Hold the button below and speak the order..."
-                                     : vm.transcript)
+                                     : vm.activeSeatTranscript)
                                     .font(.body)
-                                    .foregroundStyle(vm.transcript.isEmpty ? .secondary : .primary)
+                                    .foregroundStyle(vm.activeSeatTranscript.isEmpty ? .secondary : .primary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .animation(.easeInOut, value: vm.transcript)
+                                    .animation(.easeInOut, value: vm.activeSeatTranscript)
                             }
 
                             // Live ticket draft
@@ -118,7 +118,7 @@ struct LiveSessionView: View {
                             }
                             .buttonStyle(.bordered)
                             .tint(.green)
-                            .disabled(vm.transcript.isEmpty && vm.draft.items.isEmpty)
+                            .disabled(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty)
 
                             // Hold-to-talk
                             HoldToTalkButton(isRecording: vm.isRecording) {
@@ -133,7 +133,7 @@ struct LiveSessionView: View {
                                 Label("Edit", systemImage: "pencil.circle.fill")
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(vm.transcript.isEmpty && vm.draft.items.isEmpty)
+                            .disabled(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty)
                         }
                     }
                     .padding()
@@ -144,7 +144,10 @@ struct LiveSessionView: View {
                     get: { vm.showRepeatBack },
                     set: { vm.showRepeatBack = $0 }
                 )) {
-                    RepeatBackSheet(text: vm.repeatBackText) {
+                    RepeatBackSheet(text: vm.repeatBackText, onAddItem: { itemText in
+                        vm.showRepeatBack = false
+                        vm.addManualItem(name: itemText)
+                    }) {
                         // "Confirm & Send" tapped — create ticket and fire to kitchen
                         vm.showRepeatBack = false
                         Task { await confirmAndSend(vm: vm) }
@@ -293,8 +296,14 @@ struct AllergyAlertBanner: View {
 
 struct RepeatBackSheet: View {
     let text: String
+    /// Called when the server wants to add an item without backing out.
+    /// Receives the typed item text; parent handles dismissing the sheet + adding.
+    var onAddItem: ((String) -> Void)? = nil
     let onSendToKitchen: () -> Void
     @Environment(\.dismiss) var dismiss
+
+    @State private var showAddItem = false
+    @State private var addItemText = ""
 
     var body: some View {
         NavigationStack {
@@ -319,6 +328,16 @@ struct RepeatBackSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Edit Order") { dismiss() }
                 }
+                if onAddItem != nil {
+                    ToolbarItem(placement: .bottomBar) {
+                        Button {
+                            addItemText = ""
+                            showAddItem = true
+                        } label: {
+                            Label("Add Item", systemImage: "plus.circle")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         onSendToKitchen()
@@ -328,6 +347,16 @@ struct RepeatBackSheet: View {
                     }
                     .tint(.orange)
                 }
+            }
+            .alert("Add Item", isPresented: $showAddItem) {
+                TextField("e.g. Caesar salad no croutons", text: $addItemText)
+                Button("Add") {
+                    let t = addItemText.trimmingCharacters(in: .whitespaces)
+                    if !t.isEmpty { onAddItem?(t) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Item will be added to the current seat's order.")
             }
         }
     }

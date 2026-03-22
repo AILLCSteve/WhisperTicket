@@ -56,6 +56,7 @@ final class Ticket {
     var notes: String
     @Relationship(deleteRule: .cascade) var guests: [GuestSeat]
     var coursePacingStates: [String: String]
+    @Relationship(deleteRule: .cascade) var editHistory: [TicketEditEvent]
 
     init(
         id: String = UUID().uuidString,
@@ -75,6 +76,7 @@ final class Ticket {
         self.notes = notes
         self.guests = []
         self.coursePacingStates = [:]
+        self.editHistory = []
     }
 
     var ticketStatus: TicketStatus { TicketStatus(rawValue: status) ?? .open }
@@ -100,10 +102,12 @@ final class Ticket {
 @Model
 final class GuestSeat {
     var seatNumber: Int
+    var rawTranscript: String          // per-seat voice transcript (preserved after send)
     @Relationship(deleteRule: .cascade) var items: [TicketItem]
 
-    init(seatNumber: Int) {
+    init(seatNumber: Int, rawTranscript: String = "") {
         self.seatNumber = seatNumber
+        self.rawTranscript = rawTranscript
         self.items = []
     }
 }
@@ -162,5 +166,24 @@ final class TicketModifier {
         self.name = name
         self.priceDelta = priceDelta
         self.isNegation = isNegation
+    }
+}
+
+// MARK: - Edit History
+
+/// Records a single mutation event on a ticket for full audit trail.
+/// Stored per-ticket; viewable after the ticket is closed.
+@Model
+final class TicketEditEvent {
+    var timestamp: Date
+    var eventType: String   // "transcript_set" | "item_added" | "item_removed" | "item_moved" | "notes_updated" | "status_changed"
+    var seatNumber: Int     // 0 = table-level event
+    var summary: String     // human-readable description shown in history view
+
+    init(eventType: String, seatNumber: Int = 0, summary: String) {
+        self.timestamp = Date()
+        self.eventType = eventType
+        self.seatNumber = seatNumber
+        self.summary = summary
     }
 }

@@ -7,6 +7,8 @@ struct TicketEditorView: View {
     @State private var showSeatMap = false
     @State private var editingTranscript = false
     @State private var transcriptText = ""
+    // Per-seat transcript editing: (seat, initial text)
+    @State private var editingSeatTranscript: (GuestSeat, String)? = nil
 
     var body: some View {
         if let vm {
@@ -79,7 +81,7 @@ struct TicketEditorView: View {
                     }
                 }
 
-                // ── Items by Seat ──────────────────────────────────────────
+                // ── Items by Seat (with per-seat transcript) ───────────────
                 if ticket.guests.isEmpty || ticket.allItems.isEmpty {
                     Section("Order Items") {
                         Text("No items — order was entered as transcript only")
@@ -88,7 +90,29 @@ struct TicketEditorView: View {
                     }
                 } else {
                     ForEach(ticket.guests.sorted(by: { $0.seatNumber < $1.seatNumber })) { seat in
-                        Section("Seat \(seat.seatNumber)") {
+                        Section(header: Label("Seat \(seat.seatNumber)", systemImage: "person")) {
+                            // Per-seat voice transcript (tappable to edit if ticket not closed)
+                            if !seat.rawTranscript.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Label("Transcript", systemImage: "mic")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.secondary)
+                                    Text(seat.rawTranscript)
+                                        .font(.callout)
+                                        .foregroundStyle(.primary)
+                                }
+                                .padding(.vertical, 4)
+
+                                if ticket.ticketStatus != .closed {
+                                    Button {
+                                        vm.editingSeatTranscript = (seat, seat.rawTranscript)
+                                    } label: {
+                                        Label("Edit Transcript", systemImage: "pencil")
+                                            .font(.caption)
+                                    }
+                                }
+                            }
+
                             ForEach(seat.items) { item in
                                 TicketItemRow(
                                     item: item,
@@ -109,6 +133,27 @@ struct TicketEditorView: View {
                 // ── Notes ──────────────────────────────────────────────────
                 if !ticket.notes.isEmpty {
                     Section("Notes") { Text(ticket.notes) }
+                }
+
+                // ── Edit History (shown always; full audit trail when closed) ─
+                if !ticket.editHistory.isEmpty {
+                    Section("Edit History") {
+                        ForEach(ticket.editHistory.sorted(by: { $0.timestamp < $1.timestamp })) { event in
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: editHistoryIcon(event.eventType))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 16)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(event.summary)
+                                        .font(.callout)
+                                    Text(event.timestamp.formatted(.dateTime.hour().minute().second()))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // ── Actions ────────────────────────────────────────────────
@@ -146,6 +191,20 @@ struct TicketEditorView: View {
                     editingTranscript = false
                 }
             }
+            .sheet(item: Binding(
+                get: { editingSeatTranscript.map { SeatTranscriptEditWrapper(id: $0.0.seatNumber, seat: $0.0, text: $0.1) } },
+                set: { if $0 == nil { editingSeatTranscript = nil } }
+            )) { (wrapper: SeatTranscriptEditWrapper) in
+                TranscriptEditorSheet(text: Binding(
+                    get: { editingSeatTranscript?.1 ?? "" },
+                    set: { editingSeatTranscript = (wrapper.seat, $0) }
+                )) {
+                    if let (seat, text) = editingSeatTranscript {
+                        Task { await vm.updateSeatTranscript(text, for: seat) }
+                    }
+                    editingSeatTranscript = nil
+                }
+            }
         } else {
             ProgressView()
                 .task {
@@ -157,6 +216,25 @@ struct TicketEditorView: View {
     private func formatInterval(_ interval: TimeInterval) -> String {
         "\(Int(interval / 60))m \(Int(interval) % 60)s"
     }
+
+    private func editHistoryIcon(_ eventType: String) -> String {
+        switch eventType {
+        case "item_added":     return "plus.circle"
+        case "item_removed":   return "minus.circle"
+        case "item_moved":     return "arrow.left.arrow.right"
+        case "notes_updated":  return "note.text"
+        case "transcript_set": return "mic"
+        case "status_changed": return "arrow.triangle.2.circlepath"
+        default:               return "clock"
+        }
+    }
+}
+
+/// Minimal Identifiable wrapper so `.sheet(item:)` can drive the per-seat transcript editor.
+private struct SeatTranscriptEditWrapper: Identifiable {
+    let id: Int   // seat number
+    let seat: GuestSeat
+    let text: String
 }
 
 // MARK: - Transcript Editor Sheet

@@ -72,7 +72,10 @@ struct TableOrderEntryView: View {
             bottomControls(vm: vm)
         }
         .sheet(isPresented: Binding(get: { vm.showRepeatBack }, set: { vm.showRepeatBack = $0 })) {
-            RepeatBackSheet(text: vm.repeatBackText) {
+            RepeatBackSheet(text: vm.repeatBackText, onAddItem: { itemText in
+                vm.showRepeatBack = false
+                vm.addManualItem(name: itemText)
+            }) {
                 vm.showRepeatBack = false
                 Task { await createAndSend(vm: vm) }
             }
@@ -205,49 +208,48 @@ struct TableOrderEntryView: View {
         }
     }
 
-    // MARK: - Live Transcript for Active Seat
+    // MARK: - Per-Seat Transcript Stack
 
     @ViewBuilder
     private func transcriptSection(vm: LiveSessionViewModel) -> some View {
-        let seatLabel = activeSeat.label
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Recording for: \(seatLabel)", systemImage: "mic.fill")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(Color.accentColor)
+                Label("Transcripts", systemImage: "mic.fill")
+                    .font(.headline)
                 Spacer()
                 if vm.isFinalizingTranscription {
-                    ProgressView()
-                        .scaleEffect(0.7)
+                    HStack(spacing: 6) {
+                        ProgressView().scaleEffect(0.7)
+                        Text("Processing…").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            if vm.isRecording {
-                HStack(spacing: 8) {
-                    Image(systemName: "waveform")
-                        .foregroundStyle(vm.noiseLevel > 0.75 ? .orange : .green)
-                    ProgressView(value: Double(vm.noiseLevel))
-                        .tint(vm.noiseLevel > 0.75 ? .orange : .green)
-                        .frame(maxWidth: 120)
-                    Text(vm.noiseLevel > 0.75 ? "Loud" : "Good")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
+            // Show a card for every seat that has a transcript OR is currently active.
+            // Cards stack vertically; tapping a non-active card switches to that seat.
+            ForEach(seatConfigs.indices, id: \.self) { idx in
+                let seatNum = idx + 1
+                let isActive = seatNum == activeSeatIndex + 1
+                let storedTranscript = vm.seatTranscripts[seatNum] ?? ""
+                // While recording for this seat, show live text; otherwise stored text.
+                let displayText = (isActive && vm.isRecording)
+                    ? vm.activeSeatTranscript
+                    : storedTranscript
 
-            if !vm.transcript.isEmpty {
-                Text(vm.transcript)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .animation(.easeInOut, value: vm.transcript)
-            } else if !vm.isRecording {
-                Text("Hold the mic button to record \(seatLabel)'s order.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .italic()
+                if isActive || !storedTranscript.isEmpty {
+                    SeatTranscriptCard(
+                        seatLabel: seatConfigs[idx].label,
+                        transcript: displayText,
+                        isActive: isActive,
+                        isRecording: isActive && vm.isRecording,
+                        noiseLevel: vm.noiseLevel
+                    ) {
+                        // Tap → switch active seat
+                        activeSeatIndex = idx
+                        vm.activeSeatNumber = seatNum
+                        vm.activeSeatLabel = seatConfigs[idx].label
+                    }
+                }
             }
 
             // Allergy banners
@@ -324,7 +326,7 @@ struct TableOrderEntryView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
-                .disabled(vm.draft.items.isEmpty && vm.transcript.isEmpty)
+                .disabled(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty)
 
                 // Hold-to-Talk
                 HoldToTalkButton(isRecording: vm.isRecording) {
@@ -438,5 +440,70 @@ struct SeatChip: View {
         } message: {
             Text("Use a helpful cue: \"Mom\", \"Blue shirt\", \"Window seat\"")
         }
+    }
+}
+
+// MARK: - Seat Transcript Card
+
+/// Displays the transcript for one seat in the stacked transcript view.
+/// Tapping a non-active card switches the active seat to this one.
+struct SeatTranscriptCard: View {
+    let seatLabel: String
+    let transcript: String
+    let isActive: Bool
+    let isRecording: Bool
+    let noiseLevel: Float
+    let onTap: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label(
+                    isActive ? "Recording: \(seatLabel)" : seatLabel,
+                    systemImage: isActive ? "person.fill" : "person"
+                )
+                .font(.subheadline.bold())
+                .foregroundStyle(isActive ? Color.accentColor : .primary)
+
+                Spacer()
+
+                if isRecording {
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform")
+                            .foregroundStyle(noiseLevel > 0.75 ? .orange : .green)
+                        ProgressView(value: Double(noiseLevel))
+                            .tint(noiseLevel > 0.75 ? .orange : .green)
+                            .frame(maxWidth: 80)
+                        Text(noiseLevel > 0.75 ? "Loud" : "Good")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                } else if !isActive {
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            if !transcript.isEmpty {
+                Text(transcript)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(.easeInOut, value: transcript)
+            } else if isActive {
+                Text("Hold the mic button to record \(seatLabel)'s order.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .italic()
+            }
+        }
+        .padding(12)
+        .background(isActive ? Color.accentColor.opacity(0.07) : Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isActive ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1.5)
+        )
+        .onTapGesture(perform: onTap)
     }
 }

@@ -16,17 +16,17 @@ struct WhisperTicketApp: App {
 
     init() {
         do {
-            container = try ModelContainer(for: Ticket.self, GuestSeat.self, TicketItem.self, TicketModifier.self)
+            container = try ModelContainer(
+                for: Ticket.self, GuestSeat.self, TicketItem.self,
+                    TicketModifier.self, TicketEditEvent.self
+            )
         } catch {
             fatalError("Failed to create ModelContainer: \(error)")
         }
-
-        SFSpeechTranscriptionService.requestPermission { granted in
-            if !granted { print("⚠️ Speech recognition not authorized") }
-        }
-        AVAudioSession.sharedInstance().requestRecordPermission { granted in
-            if !granted { print("⚠️ Microphone not authorized") }
-        }
+        // Permission requests are deferred to .task{} below.
+        // Calling them here (before the SwiftUI scene/window exists) causes a
+        // crash on first launch because the OS permission dialog requires an
+        // active UIWindowScene to present — which doesn't exist during App.init().
     }
 
     var body: some Scene {
@@ -44,6 +44,15 @@ struct WhisperTicketApp: App {
                     floorPlanStore: floorPlanStore
                 ))
                 .task {
+                    // Request permissions after the window/scene is ready.
+                    // On first launch the OS shows permission dialogs here safely.
+                    // On subsequent launches the callbacks fire immediately (cached state).
+                    SFSpeechTranscriptionService.requestPermission { granted in
+                        if !granted { print("⚠️ Speech recognition not authorized") }
+                    }
+                    AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                        if !granted { print("⚠️ Microphone not authorized") }
+                    }
                     do {
                         try await menuStore.loadMenu()
                     } catch {

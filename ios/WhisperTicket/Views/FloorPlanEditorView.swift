@@ -176,7 +176,16 @@ struct CanvasView: View {
 struct DraggableTableTile: View {
     let table: FloorTable
     @Environment(\.appServices) var services
+
+    // Local position state — updated immediately in onEnded so the tile never
+    // visually snaps back to the old position while @Observable propagates.
+    @State private var localPosition: CGSize
     @GestureState private var dragDelta = CGSize.zero
+
+    init(table: FloorTable) {
+        self.table = table
+        _localPosition = State(initialValue: table.position)
+    }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -192,21 +201,30 @@ struct DraggableTableTile: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .shadow(radius: 3)
         .offset(
-            x: table.position.width + dragDelta.width,
-            y: table.position.height + dragDelta.height
+            x: localPosition.width  + dragDelta.width,
+            y: localPosition.height + dragDelta.height
         )
         .gesture(
             DragGesture()
                 .updating($dragDelta) { value, state, _ in state = value.translation }
                 .onEnded { value in
-                    var updated = table
-                    updated.position = CGSize(
-                        width:  max(0, table.position.width  + value.translation.width),
-                        height: max(0, table.position.height + value.translation.height)
+                    let newPos = CGSize(
+                        width:  max(0, localPosition.width  + value.translation.width),
+                        height: max(0, localPosition.height + value.translation.height)
                     )
+                    // Update local state IMMEDIATELY so the view shows the correct
+                    // position in the same frame that @GestureState resets to zero.
+                    localPosition = newPos
+                    var updated = table
+                    updated.position = newPos
                     services.floorPlanStore.upsertTable(updated)
                 }
         )
+        // Sync from external changes (e.g. Reset to Default) so localPosition
+        // stays in step with the authoritative store value.
+        .onChange(of: table.position) { _, newPos in
+            localPosition = newPos
+        }
     }
 }
 
