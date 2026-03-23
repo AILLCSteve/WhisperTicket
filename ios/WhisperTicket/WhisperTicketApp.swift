@@ -15,18 +15,34 @@ struct WhisperTicketApp: App {
     let floorPlanStore = FloorPlanStore()
 
     init() {
+        // Build an explicit schema + config so we can recover from migration failures.
+        // Every time we add/change @Model properties during dev, the old on-device
+        // SQLite store is incompatible. SwiftData throws instead of auto-migrating,
+        // hitting fatalError and crashing before anything renders.
+        // Fix: catch the failure, wipe the old store, open fresh.
+        // Production would use a VersionedSchema + MigrationPlan to preserve data.
+        let schema = Schema([
+            Ticket.self, GuestSeat.self, TicketItem.self,
+            TicketModifier.self, TicketEditEvent.self
+        ])
+        let config = ModelConfiguration(schema: schema)
         do {
-            container = try ModelContainer(
-                for: Ticket.self, GuestSeat.self, TicketItem.self,
-                    TicketModifier.self, TicketEditEvent.self
-            )
+            container = try ModelContainer(for: schema, configurations: config)
         } catch {
-            fatalError("Failed to create ModelContainer: \(error)")
+            print("⚠️ ModelContainer migration failed: \(error) — wiping store")
+            let url = config.url
+            for ext in ["", "-wal", "-shm"] {
+                try? FileManager.default.removeItem(
+                    at: URL(fileURLWithPath: url.path + ext)
+                )
+            }
+            do {
+                container = try ModelContainer(for: schema, configurations: config)
+            } catch {
+                fatalError("ModelContainer failed even after store wipe: \(error)")
+            }
         }
-        // Permission requests are deferred to .task{} below.
-        // Calling them here (before the SwiftUI scene/window exists) causes a
-        // crash on first launch because the OS permission dialog requires an
-        // active UIWindowScene to present — which doesn't exist during App.init().
+        // Permissions deferred to .task{} — App.init() has no UIWindowScene yet.
     }
 
     var body: some Scene {
