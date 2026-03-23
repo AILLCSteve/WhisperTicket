@@ -144,7 +144,7 @@ struct LiveSessionView: View {
                     get: { vm.showRepeatBack },
                     set: { vm.showRepeatBack = $0 }
                 )) {
-                    RepeatBackSheet(text: vm.repeatBackText, onAddItem: { itemText in
+                    RepeatBackSheet(draft: vm.draft, onAddItem: { itemText in
                         vm.showRepeatBack = false
                         vm.addManualItem(name: itemText)
                     }) {
@@ -295,7 +295,8 @@ struct AllergyAlertBanner: View {
 // MARK: - Repeat-Back Sheet
 
 struct RepeatBackSheet: View {
-    let text: String
+    let draft: TicketDraft
+    var seatLabels: [Int: String] = [:]
     /// Called when the server wants to add an item without backing out.
     /// Receives the typed item text; parent handles dismissing the sheet + adding.
     var onAddItem: ((String) -> Void)? = nil
@@ -312,13 +313,7 @@ struct RepeatBackSheet: View {
                     Text("Review the order with your guests before sending to the kitchen.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    Text(text)
-                        .font(.body)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    orderContent
                 }
                 .padding()
             }
@@ -359,6 +354,86 @@ struct RepeatBackSheet: View {
                 Text("Item will be added to the current seat's order.")
             }
         }
+    }
+
+    @ViewBuilder
+    private var orderContent: some View {
+        let seatedNums = Set(draft.items.compactMap { $0.seatNumber }).sorted()
+        let unseated = draft.items.filter { $0.seatNumber == nil }
+        if !seatedNums.isEmpty || !unseated.isEmpty {
+            ForEach(seatedNums, id: \.self) { num in
+                SeatOrderSection(
+                    label: seatLabels[num] ?? "Seat \(num)",
+                    items: draft.items.filter { $0.seatNumber == num },
+                    transcript: draft.seatTranscripts[num]
+                )
+            }
+            if !unseated.isEmpty {
+                SeatOrderSection(label: "Unassigned", items: unseated, transcript: nil)
+            }
+        } else if !draft.aggregateTranscript.isEmpty {
+            Text(draft.aggregateTranscript)
+                .font(.body)
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else {
+            Text("No order captured yet.")
+                .foregroundStyle(.secondary)
+                .italic()
+        }
+    }
+}
+
+// MARK: - Seat Order Section
+
+private struct SeatOrderSection: View {
+    let label: String
+    let items: [DraftItem]
+    let transcript: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(label, systemImage: "person")
+                .font(.subheadline.bold())
+
+            if items.isEmpty {
+                if let t = transcript, !t.isEmpty {
+                    Text("Transcript: \"\(t)\"")
+                        .font(.callout).foregroundStyle(.secondary).italic()
+                } else {
+                    Text("No items").font(.callout).foregroundStyle(.secondary).italic()
+                }
+            } else {
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("\u{2022}").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text("\(item.quantity)\u{00D7} \(item.name)").fontWeight(.medium)
+                                if item.hasAllergyFlag {
+                                    Label("ALLERGY", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption2).foregroundStyle(.white)
+                                        .padding(.horizontal, 5).padding(.vertical, 2)
+                                        .background(.red).clipShape(Capsule())
+                                }
+                            }
+                            if !item.modifierNames.isEmpty {
+                                Text(item.modifierNames.joined(separator: ", "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            if !item.notes.isEmpty {
+                                Text(item.notes).font(.caption).foregroundStyle(.orange).italic()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 

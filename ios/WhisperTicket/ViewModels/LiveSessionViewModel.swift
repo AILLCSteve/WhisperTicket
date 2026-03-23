@@ -11,7 +11,6 @@ final class LiveSessionViewModel {
     var isRecording = false
     var noiseLevel: Float = 0.0
     var showNoisyEnvironmentWarning = false
-    var repeatBackText: String = ""
     var showRepeatBack = false
     var detectedMacro: VoiceMacro? = nil
     var errorMessage: String? = nil
@@ -89,14 +88,6 @@ final class LiveSessionViewModel {
     }
 
     func triggerRepeatBack() {
-        let summary = parser.repeatBackSummary(for: draft)
-        if summary.isEmpty && !draft.aggregateTranscript.isEmpty {
-            repeatBackText = draft.aggregateTranscript
-        } else if summary.isEmpty {
-            repeatBackText = activeSeatTranscript
-        } else {
-            repeatBackText = summary
-        }
         showRepeatBack = true
     }
 
@@ -175,10 +166,7 @@ final class LiveSessionViewModel {
             detectedMacro = macro
         }
 
-        guard let menu = menuStore.menu else {
-            if segment.isFinal { finalizeTranscription() }
-            return
-        }
+        guard let menu = menuStore.menu else { return }
 
         let previousIds = Set(draft.items.map { $0.id })
         let updatedDraft = parser.parseDraft(transcript: segment.text, existingDraft: draft, menu: menu)
@@ -197,8 +185,6 @@ final class LiveSessionViewModel {
         allergyItemsPendingConfirm.append(contentsOf: newAllergyItems)
 
         refreshUpsells()
-
-        if segment.isFinal { finalizeTranscription() }
     }
 
     private func finalizeTranscription() {

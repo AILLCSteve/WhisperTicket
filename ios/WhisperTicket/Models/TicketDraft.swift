@@ -24,9 +24,13 @@ struct TicketDraft {
     }
 
     mutating func addItem(_ item: DraftItem) {
+        // Dedup within the same seat only — different seats may legitimately order identical items.
+        // Parser-produced items have seatNumber = nil until the VM stamps them, so
+        // nil == nil prevents re-adding within one session, while nil != 1 allows cross-seat adds.
         let exists = items.contains { existing in
             existing.menuItemId == item.menuItemId &&
-            existing.modifierNames == item.modifierNames
+            existing.modifierNames == item.modifierNames &&
+            existing.seatNumber == item.seatNumber
         }
         if !exists { items.append(item) }
     }

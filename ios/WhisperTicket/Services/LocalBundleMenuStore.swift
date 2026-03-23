@@ -9,9 +9,28 @@ final class LocalBundleMenuStore: MenuStoreProtocol {
 
     func loadMenu() async throws {
         guard let url = resolveMenuURL() else {
-            let available = (Bundle.main.urls(forResourcesWithExtension: "json", subdirectory: nil) ?? [])
+            // ── Forensic bundle diagnostics ──────────────────────────────────────
+            let bundlePath = Bundle.main.bundlePath
+            print("⚠️ [MenuStore] MenuV1.sample.json not found.")
+            print("⚠️ [MenuStore] Bundle path: \(bundlePath)")
+
+            // JSON files registered via Bundle API
+            let registeredJSON = (Bundle.main.urls(forResourcesWithExtension: "json", subdirectory: nil) ?? [])
                 .map { $0.lastPathComponent }
-            print("⚠️ MenuV1.sample.json not found. Bundle JSON files: \(available)")
+            print("⚠️ [MenuStore] Registered JSON resources: \(registeredJSON.isEmpty ? "(none)" : registeredJSON.joined(separator: ", "))")
+
+            // Deep FileManager scan — catches files copied but not registered, path-preserved copies, etc.
+            if let enumerator = FileManager.default.enumerator(atPath: bundlePath) {
+                var matches: [String] = []
+                while let entry = enumerator.nextObject() as? String {
+                    let lower = entry.lowercased()
+                    if lower.contains("menu") || lower.hasSuffix(".json") {
+                        matches.append(entry)
+                    }
+                }
+                print("⚠️ [MenuStore] Bundle files matching 'menu' or '.json': \(matches.isEmpty ? "(none)" : matches.joined(separator: ", "))")
+            }
+            // ─────────────────────────────────────────────────────────────────────
             throw MenuStoreError.fileNotFound
         }
         do {

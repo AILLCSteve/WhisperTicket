@@ -7,7 +7,12 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private let transcriptionSubject = PassthroughSubject<TranscriptionSegment, Never>()
-    private var cancellables = Set<AnyCancellable>()
+
+    // Auto-restart state
+    private var accumulatedBase = ""
+    private var isSessionActive = false
+    private var storedAudioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>?
+    private var audioCancellable: AnyCancellable?
 
     static func requestPermission(completion: @escaping (Bool) -> Void) {
         SFSpeechRecognizer.requestAuthorization { status in
@@ -22,39 +27,72 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
     }
 
     func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>) throws {
+        storedAudioPublisher = audioPublisher
+        accumulatedBase = ""
+        isSessionActive = true
+        try beginRecognitionTask()
+    }
+
+    private func beginRecognitionTask() throws {
         guard let recognizer, recognizer.isAvailable else {
             throw TranscriptionError.recognizerUnavailable
         }
+        guard storedAudioPublisher != nil else { return }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = true
         self.recognitionRequest = request
 
+        // Capture the base text at the moment this task starts so the closure
+        // always appends to the correct prefix even across restarts.
+        let base = accumulatedBase
+
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            guard let self else { return }
+
             if let result {
-                let segment = TranscriptionSegment(
-                    text: result.bestTranscription.formattedString,
-                    isFinal: result.isFinal
-                )
-                self?.transcriptionSubject.send(segment)
+                let currentText = result.bestTranscription.formattedString
+                let fullText = base.isEmpty ? currentText : "\(base) \(currentText)"
+                let segment = TranscriptionSegment(text: fullText, isFinal: result.isFinal)
+                self.transcriptionSubject.send(segment)
+
+                if result.isFinal {
+                    if self.isSessionActive {
+                        // Accumulate and restart a new recognition task.
+                        self.accumulatedBase = fullText
+                        self.recognitionRequest = nil
+                        self.recognitionTask = nil
+                        try? self.beginRecognitionTask()
+                    }
+                    // If !isSessionActive, stopTranscribing() already cleaned up.
+                }
             }
-            if error != nil || result?.isFinal == true {
-                self?.stopTranscribing()
+
+            if let error, !self.isSessionActive {
+                // Only clean up on error when the session has been explicitly stopped;
+                // transient errors during an active session are handled by the restart path.
+                _ = error // suppress unused-variable warning
+                self.stopTranscribing()
             }
         }
 
-        audioPublisher
-            .sink { [weak request] buffer in request?.append(buffer) }
-            .store(in: &cancellables)
+        audioCancellable?.cancel()
+        audioCancellable = storedAudioPublisher?.sink { [weak request] buffer in
+            request?.append(buffer)
+        }
     }
 
     func stopTranscribing() {
+        isSessionActive = false
+        storedAudioPublisher = nil
+        audioCancellable?.cancel()
+        audioCancellable = nil
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionRequest = nil
         recognitionTask = nil
-        cancellables.removeAll()
+        accumulatedBase = ""
     }
 }
 

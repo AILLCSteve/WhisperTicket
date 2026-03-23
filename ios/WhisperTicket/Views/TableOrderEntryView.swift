@@ -72,7 +72,10 @@ struct TableOrderEntryView: View {
             bottomControls(vm: vm)
         }
         .sheet(isPresented: Binding(get: { vm.showRepeatBack }, set: { vm.showRepeatBack = $0 })) {
-            RepeatBackSheet(text: vm.repeatBackText, onAddItem: { itemText in
+            let seatLabelMap = Dictionary(
+                uniqueKeysWithValues: seatConfigs.enumerated().map { ($0.offset + 1, $0.element.label) }
+            )
+            RepeatBackSheet(draft: vm.draft, seatLabels: seatLabelMap, onAddItem: { itemText in
                 vm.showRepeatBack = false
                 vm.addManualItem(name: itemText)
             }) {
