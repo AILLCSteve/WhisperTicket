@@ -242,7 +242,7 @@ struct MapTableTile: View {
                     .font(.caption2.bold())
                     .foregroundStyle(statusColor)
             } else {
-                Text("Open").font(.caption2).foregroundStyle(.chromeTeal)
+                Text("Open").font(.caption2).foregroundStyle(Color.chromeTeal)
             }
         }
         .frame(width: 100, height: 100)
@@ -327,7 +327,7 @@ struct ChromeAvailableTableCard: View {
             VStack(spacing: 6) {
                 Text(table.name).font(.title2.bold())
                 Text("\(table.seats.count)\u{1F465}").font(.caption2).foregroundStyle(.secondary)
-                Text("Available").font(.caption2.bold()).foregroundStyle(.chromeTeal)
+                Text("Available").font(.caption2.bold()).foregroundStyle(Color.chromeTeal)
             }
             .frame(maxWidth: .infinity).frame(height: 110)
             .chromeCard(cornerRadius: 14, glowColor: .chromeTeal, glowRadius: 6)
