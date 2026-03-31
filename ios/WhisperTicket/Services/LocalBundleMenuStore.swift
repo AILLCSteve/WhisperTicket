@@ -152,7 +152,7 @@ private let embeddedMenuJSON = """
       "name": "Appetizers",
       "items": [
         {"id": "app_wings", "name": "Buffalo Wings", "price": 13.99, "description": "Crispy wings with your choice of sauce", "tags": ["appetizer"], "modifier_groups": [], "upsell_links": []},
-        {"id": "app_nachos", "name": "Loaded Nachos", "price": 11.99, "description": "Tortilla chips with cheese, jalap\u00e9nos, salsa, sour cream", "tags": ["appetizer", "shareable"], "modifier_groups": [], "upsell_links": []},
+        {"id": "app_nachos", "name": "Loaded Nachos", "price": 11.99, "description": "Tortilla chips with cheese, jalapenos, salsa, sour cream", "tags": ["appetizer", "shareable"], "modifier_groups": [], "upsell_links": []},
         {"id": "app_soup", "name": "Soup of the Day", "price": 6.99, "description": "Ask your server", "tags": ["soup"], "modifier_groups": [], "upsell_links": []}
       ]
     },
