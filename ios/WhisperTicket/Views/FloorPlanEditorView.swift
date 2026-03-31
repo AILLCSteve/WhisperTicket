@@ -47,6 +47,11 @@ struct FloorPlanEditorView: View {
                         Button { showSectionEditor = true } label: {
                             Label("Manage Sections", systemImage: "rectangle.3.group")
                         }
+                        Button {
+                            services.floorPlanStore.resetTablePositions()
+                        } label: {
+                            Label("Reset Table Positions", systemImage: "arrow.uturn.backward.circle")
+                        }
                         Divider()
                         Button(role: .destructive) {
                             showResetConfirm = true

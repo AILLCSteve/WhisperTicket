@@ -38,6 +38,7 @@ protocol OrderParserProtocol {
 protocol MenuStoreProtocol: AnyObject {
     var menu: MenuV1? { get }
     func loadMenu() async throws
+    func saveMenu(_ newMenu: MenuV1)
     func findBestMatches(text: String, maxResults: Int) -> [(item: MenuItem, score: Double)]
     func item(byId id: String) -> MenuItem?
 }

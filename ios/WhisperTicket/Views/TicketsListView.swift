@@ -23,7 +23,7 @@ struct TicketsListView: View {
                                 }
                             } header: {
                                 Label("Open", systemImage: "circle.fill")
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(Color.chromePrimary)
                             }
                         }
 
@@ -148,9 +148,9 @@ struct StatusBadge: View {
     }
     var statusColor: Color {
         switch status {
-        case .open: return .blue
-        case .sent: return .orange
-        case .delivered: return .green
+        case .open: return .chromePrimary
+        case .sent: return .chromeAmber
+        case .delivered: return .chromeTeal
         case .closed: return .secondary
         }
     }

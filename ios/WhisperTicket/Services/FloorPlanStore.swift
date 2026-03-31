@@ -23,6 +23,16 @@ final class FloorPlanStore {
         UserDefaults.standard.set(data, forKey: key)
     }
 
+    /// Resets all table drag offsets to .zero without changing table names or seats.
+    func resetTablePositions() {
+        floorPlan.tables = floorPlan.tables.map { table in
+            var t = table
+            t.position = .zero
+            return t
+        }
+        save()
+    }
+
     // MARK: - Table management
 
     func upsertTable(_ table: FloorTable) {

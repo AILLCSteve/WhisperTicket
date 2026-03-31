@@ -9,10 +9,17 @@ final class TicketEditorViewModel {
     var coursePacingStates: [CourseFlag: CoursePacingState] = [:]
 
     private let repository: TicketRepositoryProtocol
+    private let parser: OrderParserProtocol?
+    private let menuStore: MenuStoreProtocol?
 
-    init(ticket: Ticket, repository: TicketRepositoryProtocol) {
+    init(ticket: Ticket,
+         repository: TicketRepositoryProtocol,
+         parser: OrderParserProtocol? = nil,
+         menuStore: MenuStoreProtocol? = nil) {
         self.ticket = ticket
         self.repository = repository
+        self.parser = parser
+        self.menuStore = menuStore
         for (key, value) in ticket.coursePacingStates {
             if let flag = CourseFlag(rawValue: key), let state = CoursePacingState(rawValue: value) {
                 coursePacingStates[flag] = state
@@ -68,15 +75,56 @@ final class TicketEditorViewModel {
 
     func updateTranscript(_ text: String) async {
         ticket.rawTranscript = text
-        logEdit(type: "transcript_set", summary: "Edited ticket transcript")
+        // Cascade: update the primary seat transcript and re-parse items.
+        if let primarySeat = ticket.guests.sorted(by: { $0.seatNumber < $1.seatNumber }).first {
+            primarySeat.rawTranscript = text
+            reparseItems(for: primarySeat, transcript: text)
+        }
+        let preview = text.prefix(80)
+        let suffix = text.count > 80 ? "…" : ""
+        logEdit(type: "transcript_set", summary: "Table transcript: \(preview)\(suffix)")
         await save()
     }
 
     func updateSeatTranscript(_ text: String, for seat: GuestSeat) async {
         seat.rawTranscript = text
+        reparseItems(for: seat, transcript: text)
+        let preview = text.prefix(80)
+        let suffix = text.count > 80 ? "…" : ""
         logEdit(type: "transcript_set", seatNumber: seat.seatNumber,
-                summary: "Edited Seat \(seat.seatNumber) transcript")
+                summary: "Seat \(seat.seatNumber): \(preview)\(suffix)")
         await save()
+    }
+
+    /// Re-parses a transcript and appends any newly discovered items to the seat.
+    /// Existing items are preserved — only net-new items are added (merge, not replace).
+    private func reparseItems(for seat: GuestSeat, transcript: String) {
+        guard let parser, let menu = menuStore?.menu else { return }
+        let draft = TicketDraft(tableNumber: ticket.tableNumber)
+        let parsed = parser.parseDraft(transcript: transcript, existingDraft: draft, menu: menu)
+
+        for draftItem in parsed.items {
+            let alreadyExists = seat.items.contains {
+                $0.menuItemId == draftItem.menuItemId && $0.name == draftItem.name
+            }
+            guard !alreadyExists else { continue }
+            let newItem = TicketItem(
+                menuItemId: draftItem.menuItemId,
+                name: draftItem.name,
+                quantity: draftItem.quantity,
+                course: draftItem.course,
+                notes: draftItem.notes,
+                confidence: draftItem.confidence,
+                hasAllergyFlag: draftItem.hasAllergyFlag
+            )
+            for modName in draftItem.modifierNames {
+                let isNeg = draftItem.negations.contains(modName)
+                newItem.modifiers.append(TicketModifier(name: modName, priceDelta: 0, isNegation: isNeg))
+            }
+            seat.items.append(newItem)
+            logEdit(type: "item_added", seatNumber: seat.seatNumber,
+                    summary: "Auto-parsed from transcript: \(draftItem.name)")
+        }
     }
 
     func updateItemNotes(_ item: TicketItem, notes: String) async {

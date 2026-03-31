@@ -51,7 +51,8 @@ struct TicketEditorView: View {
         } else {
             ProgressView()
                 .task {
-                    vm = TicketEditorViewModel(ticket: ticket, repository: services.repository)
+                    vm = TicketEditorViewModel(ticket: ticket, repository: services.repository,
+                                               parser: services.parser, menuStore: services.menuStore)
                 }
         }
     }

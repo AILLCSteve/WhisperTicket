@@ -56,7 +56,7 @@ struct WhisperTicketApp: App {
                     parser: parser,
                     upsellEngine: upsellEngine,
                     repository: SwiftDataTicketRepository(modelContext: container.mainContext),
-                    menuImporter: StubMenuImportService(),
+                    menuImporter: PDFMenuImportService(),
                     floorPlanStore: floorPlanStore
                 ))
                 .task {
@@ -109,6 +109,7 @@ private final class PlaceholderTicketRepository: TicketRepositoryProtocol {
 private final class PlaceholderMenuStore: MenuStoreProtocol {
     var menu: MenuV1? = nil
     func loadMenu() async throws {}
+    func saveMenu(_ newMenu: MenuV1) {}
     func findBestMatches(text: String, maxResults: Int) -> [(item: MenuItem, score: Double)] { [] }
     func item(byId id: String) -> MenuItem? { nil }
 }
@@ -121,7 +122,7 @@ extension EnvironmentValues {
         parser: FuzzyMenuOrderParser(),
         upsellEngine: RuleBasedUpsellEngine(),
         repository: PlaceholderTicketRepository(),
-        menuImporter: StubMenuImportService(),
+        menuImporter: PDFMenuImportService(),
         floorPlanStore: FloorPlanStore()
     )
 }

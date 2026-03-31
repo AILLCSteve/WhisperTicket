@@ -170,14 +170,31 @@ struct TableOrderEntryView: View {
                                 .font(.subheadline.bold())
                                 .foregroundStyle(isActive ? Color.accentColor : Color.primary)
                             Spacer()
-                            Button {
-                                activeSeatIndex = max(0, group.seatNumber - 1)
-                                vm.activeSeatNumber = group.seatNumber
-                                vm.clearSeat(group.seatNumber)
-                            } label: {
-                                Text("Re-record")
+                            HStack(spacing: 8) {
+                                // "Add More" — switches to this seat without clearing;
+                                // next recording session will append to existing transcript.
+                                Button {
+                                    activeSeatIndex = max(0, group.seatNumber - 1)
+                                    vm.activeSeatNumber = group.seatNumber
+                                    vm.activeSeatLabel = seatConfigs[max(0, group.seatNumber - 1)].label
+                                } label: {
+                                    Text("Add More")
+                                        .font(.caption2)
+                                        .foregroundStyle(.blue)
+                                }
+                                Text("·")
                                     .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.tertiary)
+                                // "Clear" — destructive: wipes transcript + items for this seat.
+                                Button(role: .destructive) {
+                                    activeSeatIndex = max(0, group.seatNumber - 1)
+                                    vm.activeSeatNumber = group.seatNumber
+                                    vm.clearSeat(group.seatNumber)
+                                } label: {
+                                    Text("Clear")
+                                        .font(.caption2)
+                                        .foregroundStyle(.red)
+                                }
                             }
                         }
 
@@ -336,6 +353,8 @@ struct TableOrderEntryView: View {
                     if vm.isRecording { vm.stopRecording() }
                     else { vm.startRecording() }
                 }
+                .if(vm.isRecording) { $0.chromeShimmer() }
+                .glowRing(color: vm.isRecording ? .red : .chromePrimary, radius: vm.isRecording ? 14 : 6)
             }
         }
         .padding(.horizontal, 16)
@@ -410,12 +429,18 @@ struct SeatChip: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(isActive ? Color.accentColor : Color(.secondarySystemBackground))
+            .background(
+                isActive
+                    ? LinearGradient(colors: [.chromePrimary, Color(red: 0.3, green: 0.4, blue: 0.9)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing)
+                    : LinearGradient(colors: [Color(.secondarySystemBackground), Color(.secondarySystemBackground)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
             .foregroundStyle(isActive ? .white : .primary)
             .clipShape(Capsule())
             .overlay(
                 Capsule().strokeBorder(
-                    hasItems && !isActive ? Color.green.opacity(0.5) : Color.clear,
+                    hasItems && !isActive ? Color.chromeTeal.opacity(0.5) : Color.clear,
                     lineWidth: 1.5
                 )
             )
@@ -501,11 +526,10 @@ struct SeatTranscriptCard: View {
             }
         }
         .padding(12)
-        .background(isActive ? Color.accentColor.opacity(0.07) : Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(isActive ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1.5)
+        .chromeCard(
+            cornerRadius: 12,
+            glowColor: isActive ? .chromePrimary : .clear,
+            glowRadius: isActive ? 8 : 0
         )
         .onTapGesture(perform: onTap)
     }

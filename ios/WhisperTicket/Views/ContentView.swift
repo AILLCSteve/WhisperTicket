@@ -16,8 +16,8 @@ struct ContentView: View {
                 MenuAdminView()
                     .tabItem { Label("Menu", systemImage: "menucard.fill") }
             }
+            .chromeTabBar()
 
-            // Title screen overlay — dismissed once per session
             if showWelcome {
                 WelcomeView(isPresented: $showWelcome)
                     .transition(.asymmetric(
@@ -27,6 +27,6 @@ struct ContentView: View {
                     .zIndex(1)
             }
         }
-        .animation(.easeInOut(duration: 0.4), value: showWelcome)
+        .animation(.spring(duration: 0.45, bounce: 0.1), value: showWelcome)
     }
 }

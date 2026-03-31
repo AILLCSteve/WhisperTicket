@@ -32,6 +32,10 @@ final class LiveSessionViewModel {
     private var cancellables = Set<AnyCancellable>()
     private var finalizationTimer: AnyCancellable?
     private var transcriptionCancellable: AnyCancellable?
+    // Stores transcript text that existed for the active seat before the current
+    // recording session began. New ASR segments are prepended with this so
+    // multiple mic presses accumulate rather than overwrite.
+    private var priorSeatTranscript = ""
 
     let noiseWarningThreshold: Float = 0.75
 
@@ -53,10 +57,20 @@ final class LiveSessionViewModel {
 
     func startRecording() {
         do {
+            // Capture whatever transcript already exists for this seat BEFORE starting ASR.
+            // New ASR segments will be prepended with this text so users can press record
+            // multiple times without losing prior speech.
+            priorSeatTranscript = seatTranscripts[activeSeatNumber] ?? ""
+
+            // Position the parse cursor so the parser skips already-processed prior text.
+            // If prior text exists, new words start after a space separator (+1).
+            draft.consumedCursor = priorSeatTranscript.isEmpty
+                ? 0
+                : priorSeatTranscript.count + 1
+
             try audioCapture.startCapture()
             let audioPublisher = audioCapture.audioBufferPublisher()
             try transcriptionService.startTranscribing(audioPublisher: audioPublisher)
-            draft.consumedCursor = 0
             isRecording = true
 
             transcriptionCancellable = transcriptionService.transcriptionPublisher()
@@ -120,6 +134,12 @@ final class LiveSessionViewModel {
         draft.items.removeAll { $0.seatNumber == seatNumber }
         seatTranscripts.removeValue(forKey: seatNumber)
         draft.seatTranscripts.removeValue(forKey: seatNumber)
+        // If the active seat is being cleared, reset the prior-session accumulator
+        // so the next recording starts truly fresh.
+        if seatNumber == activeSeatNumber {
+            priorSeatTranscript = ""
+            draft.consumedCursor = 0
+        }
         refreshUpsells()
     }
 
@@ -157,10 +177,18 @@ final class LiveSessionViewModel {
     // MARK: - Private
 
     private func handleTranscriptionSegment(_ segment: TranscriptionSegment) {
-        // Update per-seat transcript for the active seat
-        seatTranscripts[activeSeatNumber] = segment.text
-        draft.seatTranscripts[activeSeatNumber] = segment.text
-        draft.rawTranscript = segment.text  // keep aggregate compat field current
+        // Build the full seat transcript: everything spoken before this recording session
+        // (priorSeatTranscript) + whatever ASR has produced in this session (segment.text).
+        let fullText: String
+        if priorSeatTranscript.isEmpty {
+            fullText = segment.text
+        } else {
+            fullText = "\(priorSeatTranscript) \(segment.text)"
+        }
+
+        seatTranscripts[activeSeatNumber] = fullText
+        draft.seatTranscripts[activeSeatNumber] = fullText
+        draft.rawTranscript = fullText
 
         if let macro = parser.detectMacro(in: segment.text) {
             detectedMacro = macro
@@ -169,13 +197,13 @@ final class LiveSessionViewModel {
         guard let menu = menuStore.menu else { return }
 
         let previousIds = Set(draft.items.map { $0.id })
-        let updatedDraft = parser.parseDraft(transcript: segment.text, existingDraft: draft, menu: menu)
+        let updatedDraft = parser.parseDraft(transcript: fullText, existingDraft: draft, menu: menu)
         draft = updatedDraft
-        // Re-sync per-seat transcripts after parseDraft replaces draft (it may wipe the dict)
+        // Re-sync per-seat transcripts after parseDraft replaces the draft struct.
         draft.seatTranscripts = seatTranscripts
-        draft.rawTranscript = segment.text
+        draft.rawTranscript = fullText
 
-        // Stamp newly added items with the active seat
+        // Stamp newly added items with the active seat.
         for i in draft.items.indices where !previousIds.contains(draft.items[i].id) {
             draft.items[i].seatNumber = activeSeatNumber
         }

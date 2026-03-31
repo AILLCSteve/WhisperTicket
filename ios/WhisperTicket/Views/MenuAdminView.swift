@@ -37,6 +37,7 @@ struct MenuAdminView: View {
                             }
                         }
                     }
+                    .listStyle(.insetGrouped)
                 } else if isLoading {
                     ProgressView("Loading menu...")
                 } else {
@@ -54,6 +55,8 @@ struct MenuAdminView: View {
                 }
             }
             .navigationTitle("Menu")
+            .toolbarBackground(.regularMaterial, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Reload") {
@@ -98,7 +101,9 @@ struct MenuAdminView: View {
                         let outcome = await services.menuImporter.importMenu(from: url, fileType: fileType)
                         switch outcome {
                         case .success(let menu):
-                            importResult = "Imported: \(menu.categories.count) categories, \(menu.categories.flatMap { $0.items }.count) items"
+                            services.menuStore.saveMenu(menu)
+                            currentMenu = menu
+                            importResult = "Imported \(menu.categories.count) categories, \(menu.categories.flatMap { $0.items }.count) items"
                         case .failure(let message):
                             importResult = message
                         }
@@ -125,7 +130,11 @@ struct MenuAdminView: View {
             try await services.menuStore.loadMenu()
             currentMenu = services.menuStore.menu
         } catch {
-            errorMessage = error.localizedDescription
+            // Even on error, check if embedded fallback succeeded
+            currentMenu = services.menuStore.menu
+            if currentMenu == nil {
+                errorMessage = error.localizedDescription
+            }
         }
         isLoading = false
     }
