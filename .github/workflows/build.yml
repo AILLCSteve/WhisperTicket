@@ -132,8 +132,10 @@ jobs:
           echo "=== Bundle JSON resources ==="
           find "$APP" -name "*.json" | sort || echo "(none found)"
 
-      # ── Export + Upload (main branch only) ────────────────────────────────
-      - name: Export & Upload to TestFlight
+      # ── Export IPA (main branch only) — destination:export avoids the
+      # ASC agreement pre-flight that destination:upload performs.
+      # Upload is handled separately by xcrun altool below.
+      - name: Export IPA
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           set -o pipefail
@@ -147,7 +149,7 @@ jobs:
             <key>teamID</key>
             <string>M37X5J35F8</string>
             <key>destination</key>
-            <string>upload</string>
+            <string>export</string>
             <key>signingStyle</key>
             <string>manual</string>
             <key>provisioningProfiles</key>
@@ -163,9 +165,24 @@ jobs:
             -archivePath "$RUNNER_TEMP/WhisperTicket.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist /tmp/ExportOptions.plist \
-            -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
-            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
-            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
+            2>&1 | tee -a build.log
+
+          IPA=$(find "$RUNNER_TEMP/export" -name "*.ipa" | head -1)
+          echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
+          echo "Exported IPA: $IPA"
+
+      # ── Upload to TestFlight via altool (separate from export so errors
+      # are isolated and the IPA artifact is always available) ──────────
+      - name: Upload to TestFlight
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          set -o pipefail
+          echo "Uploading: $IPA_PATH"
+          xcrun altool --upload-app \
+            -f "$IPA_PATH" \
+            -t ios \
+            --apiKey "${{ secrets.ASC_KEY_ID }}" \
+            --apiIssuer "${{ secrets.ASC_ISSUER_ID }}" \
             2>&1 | tee -a build.log
 
       # ── Set compliance + distribute to internal group via ASC API ───────────
@@ -294,9 +311,6 @@ jobs:
             -archivePath "$RUNNER_TEMP/WhisperTicket.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist /tmp/ExportOptions.plist \
-            -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
-            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
-            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
             2>&1 | tee -a build.log
 
       # ── Artifacts ─────────────────────────────────────────────────────────
