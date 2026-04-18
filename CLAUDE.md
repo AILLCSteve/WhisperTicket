@@ -1,802 +1,910 @@
-# CLAUDE.md — Operating Manual for Claude Code in This Repository
+# CLAUDE.md — WhisperTicket Unified Knowledge Base
 
-This file is the standing operating manual for Claude Code when working in this repository.
-It is written for real software delivery inside a live codebase: debugging, refactoring, extending, testing, documenting, and shipping.
+> **For Claude Code:** Read this entire file at the start of every session. It contains
+> your engineering principles, project architecture, known bugs, debugging protocols,
+> and CI procedures. Do not skip sections. The WhisperTicket-specific section begins
+> at `## 8. PROJECT: WhisperTicket` and is the most critical context for this repo.
 
-These instructions are **binding defaults** unless the user gives a direct task-specific override.
-When instructions conflict, resolve them in this order:
-1. Explicit user request for the current task
-2. This `CLAUDE.md`
-3. Existing repository conventions and architecture
-4. Generic preferences or habits
+-----
 
----
+## TABLE OF CONTENTS
 
-## 1. Core Mission
+1. [Engineering Principles](#1-engineering-principles)
+1. [Code Quality Standards](#2-code-quality-standards)
+1. [Architecture Guidelines](#3-architecture-guidelines)
+1. [Git Workflow](#4-git-workflow)
+1. [Brainstorming Protocol](#5-brainstorming-protocol)
+1. [Configuration Management](#6-configuration-management)
+1. [Documentation Standards](#7-documentation-standards)
+1. [PROJECT: WhisperTicket](#8-project-whisperticket)
+- 8.1 App Overview & Purpose
+- 8.2 Full Stack Map
+- 8.3 Data Flow Architecture
+- 8.4 Transcription Service — Critical Knowledge
+- 8.5 Per-Seat State Management
+- 8.6 Order Parser — Known Limitations & Fixes
+- 8.7 Menu Store & Matching
+- 8.8 SwiftData — Known Pitfalls
+- 8.9 SwiftUI Patterns in This Codebase
+- 8.10 CI/CD Pipeline
+- 8.11 Debugging Protocols
+- 8.12 Priority Bug List
+- 8.13 Phase 2 Roadmap
+- 8.14 Files You Must Read Before Touching Each Subsystem
 
-Your job is to help ship correct, maintainable, production-grade software.
+-----
 
-Optimize for:
-- **Correctness before speed**
-- **Clarity over cleverness**
-- **Small, cohesive changes**
-- **Evidence before assumption**
-- **Readable code over impressive code**
-- **Deterministic workflows around nondeterministic AI systems**
-- **Fastest path to a verified working baseline**
-- **Windows-aware planning for Apple-platform delivery**
-- **Operationally realistic iOS release engineering**
+## 1. ENGINEERING PRINCIPLES
 
-Never behave like a generic chatbot. Behave like a careful senior engineer working inside an existing system with real constraints.
+### SOLID Principles
 
----
+- **S — Single Responsibility:** Every class, struct, and function has one reason to change. Services handle one domain. ViewModels handle one screen’s state. Parsers parse; they do not persist.
+- **O — Open/Closed:** Extend behavior via protocol conformance and new types. Do not modify existing working implementations to add new behavior — add a new conformer.
+- **L — Liskov Substitution:** Any protocol conformer must be fully substitutable. Never add preconditions that the protocol does not specify.
+- **I — Interface Segregation:** Protocols in `Protocols.swift` are already narrow. Keep them that way. Do not add methods to a protocol that only one conformer needs.
+- **D — Dependency Inversion:** All services are injected via `AppServices` / environment. Never instantiate a concrete service inside a ViewModel or View.
 
-## 2. Session Operating Protocol
+### DRY / KISS / YAGNI
 
-At the start of every non-trivial task, follow this sequence.
+- **DRY:** If you write the same logic twice, extract it. Token overlap scoring appears in both `FuzzyMenuOrderParser` and `LocalBundleMenuStore` — this is a known duplication to resolve.
+- **KISS:** Prefer the simpler solution. The fuzzy parser is intentionally simple. Do not reach for ML or embedding-based matching until the simple approach is proven insufficient.
+- **YAGNI:** Do not build Phase 2 features during Phase 1 work. The `StubMenuImportService` exists precisely so Phase 2 wiring does not creep into Phase 1 sessions.
 
-### 2.1 Understand Before Editing
-1. Restate the task internally.
-2. Identify whether the work is primarily:
-   - exploration
-   - debugging
-   - refactor
-   - feature work
-   - testing
-   - architecture/design
-   - docs/ops
-   - CI/CD
-   - signing/release engineering
-3. Read the relevant context before making changes.
-4. Prefer small, verifiable edits over sweeping rewrites.
-5. Determine the **current success checkpoint** before acting.
-   Examples:
-   - “compile on CI”
-   - “archive succeeds”
-   - “signing succeeds”
-   - “export succeeds”
-   - “upload succeeds”
-   - “Apple validation succeeds”
+### Clean Code
 
-### 2.2 Digest-First Rule (Mandatory)
-When asked to refactor, debug, extend, test, or explain existing code:
+- Functions under 20 lines where possible. If a function is longer, it is doing something inherently complex and deserves a clear comment explaining why.
+- No magic numbers. Named constants or enums only.
+- Error paths must be explicit. Never silently swallow errors with bare `try?` in production paths — only in genuinely non-critical fallbacks (e.g., `FloorPlanStore.save()`).
+- Comments explain **why**, not **what**. The code shows what. Comments show intent.
 
-1. **Search for and read `digestsynopsisSUMMARY.md` first.**
-2. If found, treat it as the canonical map for:
-   - project purpose
-   - architecture and boundaries
-   - important modules/files
-   - function/class/endpoint mappings
-   - data flow and contracts
-   - known risks, TODOs, and current weak spots
-3. Then read other supporting docs such as:
-   - `README.md`
-   - `docs/`
-   - architecture notes
-   - ADRs
-   - runbooks
-   - `*digest*.md`
-   - `*summary*.md`
-4. If the digest is large, read it in chunks. Do not skip it.
-5. If no digest exists:
-   - say so explicitly
-   - proceed carefully
-   - keep changes tighter
-   - avoid broad assumptions
+### Domain-Driven Design
 
-### 2.3 Evidence-Gated Action
-Before editing, gather evidence from the actual codebase:
-- call sites
-- type definitions
-- tests
-- configs
-- migrations
-- environment usage
-- logs or failing outputs when available
+The domain language is: **Ticket, GuestSeat, DraftItem, MenuItem, ModifierGroup, CourseFlag, SeatConfig, FloorTable, ServerSection**.
 
-Do not patch based on intuition alone when the repository can answer the question.
+Use these exact terms everywhere — in variable names, function names, comments, and log messages. Do not invent synonyms.
 
-### 2.4 Baseline-First Rule
-Before building automation, define and protect the smallest working baseline.
+- A **Ticket** is a persisted order sent or being sent to the kitchen.
+- A **TicketDraft** is the in-memory working state before confirmation.
+- A **DraftItem** becomes a **TicketItem** when the draft is committed.
+- A **GuestSeat** is a persisted per-seat record inside a Ticket.
 
-For iOS and release engineering work, always ask:
-- What is the **fastest path to a working baseline**?
-- What assumptions are still unverified?
-- Am I solving the correct layer of the problem?
-- What is the **smallest next proof** that reduces uncertainty?
+-----
 
-Do not jump to the hardest layer first if a lower layer is still unproven.
+## 2. CODE QUALITY STANDARDS
 
----
+### Swift-Specific
 
-## 3. Platform Reality: Windows-First iOS Development
+- Use `@Observable` (Swift 5.9 macro) for all ViewModels. Do not use `ObservableObject` / `@Published`.
+- Use `async/await` throughout. No completion handlers in new code.
+- Use `@MainActor` isolation for any property or function that touches UI state from a background context.
+- Prefer `struct` over `class` for value types. Use `class` only for reference-semantic objects (services, SwiftData models).
+- SwiftData models (`@Model`) are always `final class`. Never `struct`.
+- Use `private(set)` for properties that are externally readable but only internally writable.
+- Cancellables: always store in `Set<AnyCancellable>` and cancel explicitly in cleanup paths.
 
-This repository is operated primarily from **Windows**, not macOS.
+### Naming
 
-That changes how Claude should plan iOS work.
+- ViewModels: `[Screen]ViewModel` — e.g., `LiveSessionViewModel`
+- Services: `[Domain]Service` or `[Domain]Store` — e.g., `AudioCaptureService`, `LocalBundleMenuStore`
+- Protocols: descriptive with `Protocol` suffix — e.g., `TranscriptionServiceProtocol`
+- Views: `[Feature]View` — e.g., `FloorView`, `SeatMapView`
+- Avoid abbreviations except established domain terms (`VM` for ViewModel in comments only, never in code).
 
-### 3.1 Default Assumptions
-Unless the user explicitly says otherwise, assume:
-- local editing happens on Windows
-- local Xcode GUI access is unavailable
-- local `xcodebuild archive` is unavailable
-- local device deployment via Xcode is unavailable
-- GitHub Actions on `macos-*` runners is the first practical Apple-native execution environment
+### Testing Mindset
 
-Do **not** repeatedly insist on “test locally in Xcode first” unless the user actually has a Mac.
+- All services implement protocols. This means every service is mockable. Before adding a feature, ask: “Can I test this without the real microphone / real SwiftData store?”
+- `FuzzyMenuOrderParser` is a pure function — test it with static transcripts before changing any logic.
+- `SFSpeechTranscriptionService` cannot be unit-tested on CI (no microphone). Keep logic thin here and push complexity into the parser which can be tested.
 
-### 3.2 What Can Be Verified on Windows
-On Windows, Claude should verify as much as possible before invoking Apple tooling:
-- repository structure
-- YAML validity
-- config consistency
-- file paths and quoting
-- bundle IDs
-- asset catalog completeness
-- plist generation logic
-- secrets flow design
-- workflow stage boundaries
-- schema/data/config correctness
-- command portability assumptions
+-----
 
-### 3.3 What Must Be Verified on macOS / Apple Infrastructure
-These require remote macOS or Apple services:
-- `xcodebuild`
-- archive/export
-- codesigning
-- keychain import
-- provisioning profile installation
-- App Store Connect upload
-- TestFlight processing
-- App Store validation
+## 3. ARCHITECTURE GUIDELINES
 
-### 3.4 Windows-Aware iOS Strategy
-For iOS work in this repo, the preferred progression is:
-1. validate everything possible on Windows
-2. reduce the next Apple-dependent step to the smallest CI proof
-3. use GitHub Actions as the remote macOS validation layer
-4. solve one release stage at a time
-5. document the exact working path once found
+### Service Injection Pattern
 
-### 3.5 iOS CI Stage Ladder
-When building or fixing iOS delivery, prefer this sequence:
-1. project generation
-2. compile/build validation where possible
-3. archive
-4. signing
-5. export IPA
-6. upload to App Store Connect/TestFlight
-7. Apple content validation / metadata / asset fixes
+All services live in `AppServices` struct, injected via `@Entry var appServices` environment key. The pattern is:
 
-Do not call the full pipeline “working” until the intended stage has truly passed.
-
----
-
-## 4. Output Behavior
-
-Your visible responses should be concise, useful, and engineering-oriented.
-
-When appropriate, include:
-- what you changed
-- why it was needed
-- the main tradeoff
-- what to verify next
-- what was proven vs what remains unproven
-
-Do **not** expose hidden chain-of-thought.
-Do **not** narrate every micro-step.
-Do **not** claim certainty you do not have.
-
-If confidence is reduced because context is missing, say that plainly.
-
----
-
-## 5. Non-Negotiable Engineering Principles
-
-### 5.1 SOLID
-Apply SOLID by default.
-
-- **SRP**: each module/function should have one primary reason to change
-- **OCP**: extend behavior through composition, registries, or strategy objects instead of editing giant conditionals
-- **LSP**: implementations must preserve the guarantees their callers rely on
-- **ISP**: prefer small focused interfaces over large god-interfaces
-- **DIP**: domain logic should depend on abstractions, not infra details
-
-### 5.2 DRY / KISS / YAGNI
-- **DRY**: one source of truth for business rules, schemas, prompts, and constants
-- **KISS**: choose the simplest design that satisfies the current requirement
-- **YAGNI**: do not build speculative flexibility unless the codebase clearly benefits today
-
-### 5.3 Clean Code
-Prefer:
-- intention-revealing names
-- short cohesive functions
-- explicit types and schemas
-- named constants over magic values
-- comments that explain **why**, not what
-- deletion of dead code instead of leaving commented-out fragments
-
-### 5.4 Domain-Driven Design
-Use the project’s actual domain language consistently.
-Keep domain logic separate from framework glue.
-Protect aggregate boundaries and invariants.
-Do not let transport models, ORM quirks, or UI concerns leak into core business rules unless the architecture intentionally does so.
-
----
-
-## 6. Debugging Mode — Evidence First, Always
-
-**The Iron Law: no fix without confirmed root cause.**
-
-Guessing wastes cycles and introduces new bugs. This section is binding for every debug session, regardless of how obvious the fix appears.
-
-### 6.0 The Non-Negotiable Pre-Fix Sequence
-
-Before writing a single line of fix code:
-
-1. **Read the actual error output in full.** Not a summary — the raw log, the full stack trace, the exact exit code, the exact failing line.
-2. **Fetch CI logs when the failure is remote.** Use `gh run view <id> --log` or equivalent. Never debug CI from the user's screenshot alone.
-3. **State the observed failure precisely** in one sentence: what command, what exit code, what error message, at what timestamp.
-4. **Trace the execution path** from the failing command backward to its inputs. What produced the bad input? What assumption was wrong?
-5. **Form hypotheses ranked by evidence**, not by how fixable they are. Evidence = log output, timestamps, exit codes, file contents, RFC specs. Not intuition.
-6. **Add instrumentation if evidence is insufficient.** If the failure is opaque (silent flag suppressing output, masked exit code, no log), the correct next step is a diagnostic commit that surfaces more information — not a guess at the fix.
-7. **Only then implement the smallest fix that addresses the confirmed root cause.**
-
-### 6.1 Debugging Rules
-- Treat first hypotheses as provisional
-- Prefer disconfirmation over confirmation
-- Reproduce before patching whenever practical
-- Inspect the narrowest failing path first, then widen scope
-- Verify the fix against adjacent flows and likely regressions
-- **Never patch a symptom.** If exit code 56 appears, find out why before changing anything. Exit codes, HTTP status codes, and error messages are evidence — read them as such.
-
-### 6.2 Evidence-First Debugging Workflow
-1. Get the raw failure: exact error text, exit code, timestamp, failing command
-2. Identify which command produced the failure and what its inputs were
-3. Check recent changes that could have caused it
-4. Research the error code / message against official docs or known issues if unfamiliar
-5. Form 1–3 hypotheses ranked by evidence quality (strongest evidence → highest priority)
-6. If evidence is insufficient: add diagnostics (`set -x`, remove `-s` flags, add `echo` checkpoints, fetch full CI logs) and re-run before guessing
-7. Test the top hypothesis with the **minimum possible change**
-8. Confirm the fix with real output, not reasoning
-9. If fix attempt #3 fails: stop patching and question the architecture
-
-### 6.3 The 3-Strike Rule
-If three distinct fix attempts have failed:
-- **Stop.** Do not attempt fix #4.
-- Question whether the approach itself is wrong, not just the implementation.
-- Discuss the architectural assumptions with the user before proceeding.
-- Past fixes that “almost worked” do not count as investigation — they are noise.
-
-### 6.4 Multi-Component System Debugging
-When a failure is deep in a pipeline (CI → archive → signing → ASC API):
-
-**Before proposing fixes**, add diagnostic instrumentation at each boundary:
-```bash
-echo “=== JWT generated: ${#JWT} chars ===”
-echo “=== curl HTTP response code: $(curl -o /dev/null -s -w '%{http_code}' ...)===”
-echo “=== Key file exists: $(ls -la $KEY_PATH) ===”
 ```
-Run one diagnostic CI pass. Use the output to identify which layer fails. Fix that layer.
-
-Never debug a lower layer (JWT format) while the upper layer (URL encoding, flag interaction) is still unconfirmed.
-
-### 6.5 Avoid These Failure Modes
-- Cargo-cult patches: changing something because it “looks wrong” without confirming it causes the failure
-- “Just try this” fixes applied before evidence is gathered
-- Suppressing error flags (`-s`, `2>/dev/null`) without adding compensating visibility elsewhere
-- Claiming something is fixed without actual output confirming it
-- Debugging the wrong layer: treating exit code 56 as a network issue without first ruling out HTTP 401 masking
-
-### 6.6 Special Rule for iOS / CI Debugging
-Classify the failure before patching. Put it in one of these buckets:
-- repository/config problem
-- workflow/YAML problem
-- shell/quoting/path problem
-- Xcode project generation problem
-- signing identity problem
-- provisioning profile problem
-- App Store Connect auth/API problem
-- export configuration problem
-- Apple content validation problem
-- CI runner/toolchain issue
-
-Do not solve a later bucket until earlier buckets are reasonably ruled out.
-
-### 6.7 Release-Engineering Debugging Order
-For iOS delivery, debug in this order unless evidence clearly says otherwise:
-1. identifiers/config
-2. project generation
-3. archive
-4. signing assets
-5. profile installation
-6. export options
-7. upload
-8. Apple validation/content issues
-
-### 6.8 Lessons from This Repository's CI Debugging History
-
-These are confirmed patterns learned from actual failures in this codebase:
-
-- **curl exit 56 on ASC API** = curl HTTP/2 + `--fail` bug ([curl #13411](https://github.com/curl/curl/issues/13411)) masking an HTTP 401. Root cause is invalid JWT, not network failure. Do not treat as network issue.
-- **Unencoded brackets in ASC URLs** (`filter[x]`, `fields[x]`) = RFC 3986 violation. ASC's HTTP/1.1 endpoint returns 400. Fix: percent-encode as `%5B` / `%5D`. HTTP/2 is more lenient.
-- **`openssl dgst -sign` output** = DER-encoded ECDSA. JWT ES256 requires raw R||S (64 bytes). Use `scripts/gen_asc_jwt.py` (Python `cryptography` library) — do not roll a new bash converter.
-- **`macos-latest` runner** is currently `macos-15-arm64` with Xcode 26.3. iOS 26 SDK breaking changes affect SwiftUI (`.accentColor` removed as ShapeStyle, ForEach binding overload ambiguity, `CGSize: @retroactive Codable` redundant).
-- **YAML `run:` literal block scalars**: Python/script code at column 0 terminates the block. Multi-line scripts that need column-0 content (heredoc closing delimiter) must live in repo files, not inline.
-- **`ITSAppUsesNonExemptEncryption: false` in Info.plist** = Apple auto-answers compliance at upload time. The ASC API compliance PATCH is redundant but still runs for beta group distribution.
-
----
-
-## 7. Refactor Mode
-
-Refactoring must improve structure without changing intended behavior.
-
-### 7.1 Refactor Priorities
-- reduce responsibility overload
-- improve naming and boundaries
-- eliminate duplication
-- centralize repeated rules
-- make tests easier to write and reason about
-- improve observability or failure clarity when useful
-- preserve learned operational knowledge in docs/runbooks/this file
-
-### 7.2 Refactor Guardrails
-- preserve public contracts unless the task explicitly authorizes change
-- avoid mixing refactor + broad feature work in one pass
-- keep commits/change sets conceptually tight
-- update docs/tests when behavior or structure meaningfully changes
-
----
-
-## 8. Feature Development Mode
-
-When building new functionality:
-
-1. Understand where the feature belongs in the architecture
-2. Reuse existing patterns unless they are clearly harmful
-3. Define contracts first:
-   - types
-   - schemas
-   - interfaces
-   - request/response shapes
-4. Separate:
-   - domain logic
-   - orchestration/application logic
-   - infrastructure adapters
-   - presentation/transport concerns
-5. Build the smallest complete slice that works end-to-end
-6. Add tests at the right level
-
-### 8.1 Prefer This Layering
-- **Domain**: rules, entities, invariants, scoring, transforms
-- **Application/Orchestration**: use cases, workflows, sequencing, coordination
-- **Infrastructure**: DB, network, queues, file system, LLM providers, third-party APIs, CI/release glue
-- **Interface**: HTTP handlers, CLI entry points, UI adapters, serializers
-
----
-
-## 9. Testing Requirements
-
-Testing is not optional decoration.
-Choose the lightest test that proves the important thing, but do prove it.
-
-### 9.1 Test Strategy Hierarchy
-Prefer this mix when applicable:
-- **Unit tests** for pure domain logic and transforms
-- **Contract/schema tests** for boundaries and structured outputs
-- **Integration tests** for repositories, APIs, queues, and cross-module flows
-- **Characterization tests** before refactoring risky legacy behavior
-- **End-to-end tests** for business-critical user journeys
-- **Stage-based validation** for iOS delivery pipelines
-
-### 9.2 What to Cover
-Cover:
-- happy path
-- edge cases
-- expected failures
-- regressions for any significant bug fixed
-- important invariants and schema contracts
-
-### 9.3 Good Testing Habits
-- keep tests deterministic
-- use representative fixtures, not fantasy data when domain nuance matters
-- avoid brittle tests tied to irrelevant formatting
-- test observable behavior more than implementation trivia
-
-### 9.4 AI-System Testing
-For AI-assisted or LLM-dependent systems, also use:
-- prompt/version golden tests when appropriate
-- schema validation tests
-- fallback-path tests
-- timeout/retry/circuit-breaker tests
-- masked fixtures to avoid leaking secrets or unstable values
-
-### 9.5 iOS Pipeline Validation Rule
-For iOS CI, explicitly distinguish these validations:
-- project generation succeeded
-- archive succeeded
-- signing succeeded
-- profile install succeeded
-- export succeeded
-- upload succeeded
-- Apple validation succeeded
-
-Never summarize “pipeline works” unless the intended stage has passed.
-
----
-
-## 10. Architecture Rules for AI + Agentic Systems
-
-Use these when the repository includes LLMs, tools, retrieval, or multi-agent flows.
-
-### 10.1 Deterministic Shells, Nondeterministic Cores
-Wrap model calls with deterministic infrastructure:
-- stable prompts
-- explicit schemas
-- bounded budgets
-- timeouts
-- retries with jitter
-- trace IDs
-- versioned configs
-
-### 10.2 Schema-First Outputs
-Every meaningful AI boundary should have an explicit contract.
-Prefer structured outputs that can be validated.
-If a freeform answer is required, still separate:
-- raw model output
-- parsed/validated structure
-- user-facing rendering
-
-### 10.3 Evidence-First Reasoning
-For systems that synthesize facts, analyses, or recommendations:
-- preserve provenance
-- keep citations/links/IDs where available
-- distinguish source facts from model inference
-- never silently upgrade weak evidence into strong claims
-
-### 10.4 Routing and Parallelism
-When using multiple agents/tools:
-- activate the fewest components needed
-- cap concurrency
-- use partial success patterns
-- prefer `allSettled`-style orchestration where sensible
-- isolate slow or failure-prone dependencies
-
-### 10.5 Cost and Latency Discipline
-Control:
-- token budgets
-- recursion depth
-- fan-out width
-- timeout ceilings
-- cache keys and lifetimes
-
-Do not build AI orchestration that is impossible to reason about operationally.
-
----
-
-## 11. Reliability, Resilience, and Performance
-
-### 11.1 Required Reliability Patterns
-Use these when justified by the path’s criticality:
-- timeouts
-- cancellation/abort support
-- retries with backoff or jitter
-- circuit breakers
-- bulkheads
-- idempotency keys for retryable writes
-- graceful degradation for partial failure
-
-### 11.2 Concurrency Rules
-- prefer bounded concurrency
-- avoid unbounded parallel calls
-- protect shared resources
-- use queues/backpressure where bursts can overwhelm dependencies
-
-### 11.3 Performance Rules
-Optimize in this order:
-1. eliminate waste
-2. reduce unnecessary I/O
-3. cache stable expensive work
-4. simplify algorithms/data flow
-5. parallelize only when the workload and dependencies justify it
-
-### 11.4 Streaming and UX
-If output can stream, prefer fast first meaningful output over long silence.
-But do not stream misleading intermediate claims as if they were final.
-
-### 11.5 Release Pipeline Performance Rule
-For CI pipelines, optimize first for:
-1. stage clarity
-2. reproducibility
-3. diagnosability
-4. then runtime speed
-
-A 2-minute build with excellent diagnostics is better than a 90-second build that obscures the real failure.
-
----
-
-## 12. Observability and Operational Discipline
-
-Every non-trivial production system should be diagnosable.
-
-### 12.1 Observability Defaults
-Prefer:
-- structured logs
-- request/trace IDs
-- meaningful error messages
-- timing/latency measurements
-- metrics for critical paths
-- enough context to reproduce failures without exposing secrets
-
-### 12.2 Log Rules
-Never log:
-- secrets
-- raw credentials
-- unnecessary PII
-- full tokens or keys
-
-When logging failures, include enough information to localize the issue:
-- subsystem
-- operation
-- identifiers safe to expose
-- retry count / timeout context
-
-### 12.3 Runbook Mindset
-If the task reveals a recurring operational trap, update docs/runbooks when appropriate.
-A strong repository teaches future sessions how not to repeat the same failure.
-
-### 12.4 iOS Release Runbook Rule
-When an iOS delivery issue is solved, document:
-- exact failing stage
-- root cause
-- what false leads were eliminated
-- final working approach
-- required secrets/artifacts
-- any Apple-specific caveats
-- what can be reused in the next app
-
----
-
-## 13. Security and Data Safety
-
-Security is a default responsibility.
-
-### 13.1 Always Prefer
-- least-privilege access
-- parameterized queries
-- input validation and output encoding
-- secret management through environment/vault tooling
-- safe defaults in authz/authn flows
-- auditability for sensitive operations
-
-### 13.2 Never
-- hardcode secrets
-- print secrets into logs
-- trust unsanitized external input
-- weaken security controls to get tests passing without clearly flagging it
-
-### 13.3 Prompt/Tool Safety
-For AI systems using external content or tool results:
-- treat retrieved text as untrusted input
-- separate instructions from data
-- sanitize or constrain tool-fed context when needed
-- avoid allowing external content to redefine system intent
-
-### 13.4 Apple Signing Secret Safety
-For iOS release engineering:
-- separate API auth secrets from signing secrets
-- minimize cross-platform transformations of signing artifacts
-- prefer macOS-native creation/import for Apple-specific formats when feasible
-- rotate/recreate artifacts carefully, not casually
-- avoid repeated destructive changes unless the current artifact state is truly the problem
-
----
-
-## 14. Documentation Rules
-
-Documentation should help the next engineer and the next Claude session.
-
-### 14.1 Keep Fresh
-Maintain or update when relevant:
-- `README.md`
-- architecture notes
-- ADRs
-- runbooks
-- setup/build/test instructions
-- prompt registries or model config docs
-- CI/release docs
-- Apple-signing notes where relevant
-
-### 14.2 Prefer Docs That Answer
-- what this subsystem does
-- where the key entry points are
-- what contracts exist
-- how to run and validate changes
-- what known risks or constraints matter
-
-### 14.3 End-of-Task Learning Loop
-At the end of meaningful work, if appropriate, suggest concise documentation or memory updates that would help future sessions avoid repeating discovery work.
-
-### 14.4 Windows + iOS Documentation Rule
-For this repo, documentation should explicitly distinguish:
-- steps possible from Windows
-- steps requiring GitHub macOS runners
-- steps requiring Apple portal/App Store Connect interaction
-- expected secrets/artifacts and their roles
-
----
-
-## 15. How to Read and Modify a Codebase
-
-When entering unfamiliar code, follow this order:
-1. digest / synopsis docs
-2. root README and project docs
-3. entry points
-4. types/schemas/contracts
-5. tests
-6. implementation details
-7. configs and deployment/runtime assumptions
-
-For iOS release work, also inspect:
-8. project generation/config files (`project.yml`, XcodeGen files, plist definitions)
-9. GitHub workflows
-10. signing/setup scripts
-11. asset catalogs
-12. release notes/runbooks for current known-good paths
-
----
-
-## 16. Preferred Implementation Patterns
-
-Reach for these patterns when they fit.
-
-### 16.1 Good Defaults
-- pure functions for transforms and business rules
-- dependency injection at boundaries
-- adapters for DB/API/tool providers
-- explicit schemas for inputs/outputs
-- repository/service split only when it clarifies responsibilities
-- composition over inheritance
-- small utility modules over sprawling helper dumps
-
-### 16.2 Helpful Patterns for TS/JS Codebases
-- runtime validation with Zod/Valibot/TypeBox or equivalent
-- `AbortController` for cancellation
-- bounded concurrency helpers
-- `Promise.allSettled` where partial completion is acceptable
-- typed config loading at startup
-
-### 16.3 Helpful Patterns for This Repo’s iOS + CI Work
-- script repeated setup steps instead of manual portal repetition
-- keep workflow stages explicit and named by responsibility
-- use environment variables and secrets deliberately, not ad hoc
-- validate generated files before the next stage consumes them
-- use Apple-native tooling on macOS runners for Apple-specific artifact handling when feasible
-- prefer one coherent signing strategy per pipeline phase
-
-### 16.4 Avoid
-- giant files with mixed concerns
-- hidden global state unless deliberately managed
-- magical side effects at import time
-- boolean-flag explosions when a strategy/config object would be clearer
-- adding abstraction layers with no immediate payoff
-- rebuilding signing architecture from scratch without first isolating the real failure layer
-
----
-
-## 17. What a Strong Claude Code Instruction File Looks Like
-
-A strong `CLAUDE.md` should be:
-- specific enough to change behavior
-- concise enough to stay usable
-- grounded in recurring repository realities
-- explicit about platform constraints
-- structured around real workflows
-- updated after meaningful failures and successful resolutions
-
-This file therefore emphasizes:
-- evidence before assumption
-- baseline before automation
-- Windows-aware iOS delivery
-- stage-based debugging
-- operational memory for release engineering
-
----
-
-## 18. Task Templates Claude Should Implicitly Follow
-
-### 18.1 For a Bug Fix
-- identify failing path
-- inspect contracts and recent assumptions
-- confirm root cause
-- implement smallest correct fix
-- add/update regression coverage
-- summarize risk and validation
-
-### 18.2 For a Refactor
-- identify design smell
-- preserve behavior
-- tighten boundaries/naming/contracts
-- keep change set focused
-- run/update relevant tests
-
-### 18.3 For a New Feature
-- locate architectural home
-- define contracts first
-- implement vertical slice
-- add observability where needed
-- test the important path
-- document meaningful behavior/config changes
-
-### 18.4 For an AI Workflow Change
-- identify affected prompts/tools/models/schemas
-- preserve deterministic wrappers
-- validate structure and fallback behavior
-- check cost/latency implications
-- maintain source/evidence handling
-
-### 18.5 For an iOS CI / Signing Change
-- define the exact target stage
-- inspect current workflow and signing mode
-- confirm bundle ID / app record / team assumptions
-- minimize moving parts
-- change one release layer at a time
-- validate the current stage from logs
-- do not declare end-to-end success early
-- document the final working path
-
----
-
-## 19. Repository-Specific Lessons for Future iOS Work
-
-Use these lessons as standing defaults for this repo’s Apple-platform delivery work.
-
-### 19.1 Do Better Next Time
-Prefer this order:
-1. verify app identifiers, assets, and metadata first
-2. keep the first CI goal narrow
-3. avoid jumping directly into full TestFlight automation if archive/export is still unproven
-4. avoid mixing automatic and manual signing assumptions
-5. treat Apple content validation as a separate stage after upload is functioning
-
-### 19.2 Information the User Should Provide Early If Available
-If relevant, ask for or infer these early:
-- Windows vs macOS environment
-- whether any remote Mac exists
-- whether the app record already exists in App Store Connect
-- final bundle identifier
-- team ID
-- current signing strategy
-- exact goal for this session:
-  - compile only
-  - archive
-  - sign
-  - upload
-  - TestFlight installability
-  - App Store readiness
-
-### 19.3 Three Questions Claude Must Ask Internally
-1. **What is the fastest path to a working baseline?**
-2. **What assumptions am I making that are not yet verified?**
-3. **Am I solving the correct layer of the problem?**
-
-If those answers are weak, slow down and reduce scope.
-
----
-
-## 20. Final Standing Rules
-
-1. Read before editing.
-2. Prefer evidence over guesswork.
-3. Keep changes small and coherent.
-4. Preserve architectural intent unless the task is to change it.
-5. Make hidden assumptions explicit in code, types, or docs.
-6. Test the important thing.
-7. Protect reliability, security, and maintainability.
-8. Respect the Windows-first reality of this repo’s iOS workflow.
-9. Treat iOS signing and TestFlight delivery as release engineering, not casual build config.
-10. Leave the repository clearer than you found it.
-11. **Before pushing any change to `main`: bump `CURRENT_PROJECT_VERSION` in `project.yml`.** Apple rejects uploads with a duplicate build number, and TestFlight will not surface the new build to testers if the version/build pair already exists. Bump the build number on every push. Bump `MARKETING_VERSION` when the user requests a user-visible version change.
-
-If you must trade off, favor:
-**correctness > clarity > maintainability > speed of implementation > cleverness**
+WhisperTicketApp.init()
+  → builds ModelContainer
+  → constructs all concrete services
+  → injects via .environment(\.appServices, AppServices(...))
+    → every View accesses via @Environment(\.appServices) var services
+      → ViewModels receive services via init() parameters
+```
+
+Never break this chain. Never reach for a service via a singleton or shared instance.
+
+### ViewModel Lifecycle
+
+ViewModels are created inside `.task {}` blocks on the View, passed concrete services from the environment. They are `@Observable` and stored in `@State` on the View. This means:
+
+- The ViewModel lives as long as the View is in the hierarchy.
+- When the View disappears, the ViewModel is deallocated and cancellables are cancelled.
+- Do not store ViewModels in the environment — they are per-screen.
+
+### Protocol Boundaries
+
+The five core protocol boundaries are:
+
+1. `AudioCaptureServiceProtocol` → `LiveSessionViewModel`
+1. `TranscriptionServiceProtocol` → `LiveSessionViewModel`
+1. `OrderParserProtocol` → `LiveSessionViewModel` + `TicketEditorViewModel`
+1. `MenuStoreProtocol` → `LiveSessionViewModel` + `TicketEditorViewModel` + `MenuAdminView`
+1. `TicketRepositoryProtocol` → `TicketsListViewModel` + `TicketEditorViewModel` + `WelcomeView`
+
+Do not add cross-boundary calls. A parser does not call the repository. A repository does not call the parser.
+
+### Multi-Approach Rule (Before Writing Code)
+
+Before implementing any non-trivial feature, enumerate at least two approaches and state the tradeoffs. Document the chosen approach in a comment at the top of the relevant function. This prevents the single-path tunnel vision that causes debugging sessions to drag.
+
+-----
+
+## 4. GIT WORKFLOW
+
+### Branch Naming
+
+- `feature/[short-description]` — new capability
+- `fix/[short-description]` — bug fix
+- `refactor/[short-description]` — no behavior change
+- `ci/[short-description]` — CI/build changes only
+
+### Commit Messages
+
+Format: `[type]: [imperative verb] [object]`
+
+- `feat: add phonetic modifier matching to FuzzyMenuOrderParser`
+- `fix: prevent recognition task restart after stopTranscribing called`
+- `refactor: extract token overlap scoring into shared utility`
+- `ci: cache xcodegen install between runs`
+
+### Before Every Commit
+
+1. Build succeeds locally (`xcodegen generate && xcodebuild build`)
+1. No new SwiftLint warnings introduced
+1. Any new public function has at least a one-line doc comment
+1. `CLAUDE.md` updated if you changed an architectural decision
+
+### PR Rules
+
+- One PR per concern. Do not mix feature work with CI fixes.
+- Every PR description states: what changed, why, and what to test manually.
+- CI must pass before merge to `main`.
+
+-----
+
+## 5. BRAINSTORMING PROTOCOL
+
+When tackling any problem with multiple viable solutions, follow this protocol before writing code:
+
+**Step 1 — State the problem precisely.** One sentence. If you cannot, the problem is not understood yet.
+
+**Step 2 — Generate at least 3 approaches.** Label them A, B, C. Include “do nothing / minimal change” as a candidate when appropriate.
+
+**Step 3 — Evaluate each on:** correctness, complexity, testability, reversibility, CI impact.
+
+**Step 4 — State the recommendation and rationale.** One paragraph.
+
+**Step 5 — Implement the recommendation only.** Do not partially implement alternatives.
+
+This protocol is mandatory for: any change to `SFSpeechTranscriptionService`, any change to `FuzzyMenuOrderParser`, any change to `LiveSessionViewModel.startRecording()` or `stopRecording()`, and any CI workflow change.
+
+-----
+
+## 6. CONFIGURATION MANAGEMENT
+
+### Centralized Config
+
+- `project.yml` is the single source of truth for bundle ID, version, deployment target, team ID, and signing config. Do not hardcode these values anywhere in Swift source.
+- GitHub Secrets are the single source of truth for all credentials: `DIST_PRIVATE_KEY_PEM`, `DIST_CERT_DER_B64`, `DIST_CERT_P12_PASSWORD`, `PROV_PROFILE_BASE64`, `PROV_PROFILE_UUID`, `ASC_API_KEY`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `APPLE_TEAM_ID`.
+- Never commit secrets. Never log secrets. Never print secrets in CI output.
+
+### Environment Tiers
+
+- **Local dev:** `LocalBundleMenuStore` + embedded fallback menu. No network required.
+- **CI:** `macos-latest` runner, real signing, real TestFlight upload on `main` push.
+- **Phase 2:** Supabase backend replaces `SwiftDataTicketRepository` and `LocalBundleMenuStore` for cloud sync.
+
+### Feature Flags
+
+Phase 2 features are gated by stub implementations conforming to the same protocols. To enable a Phase 2 feature, swap the concrete type in `WhisperTicketApp.init()`. No `#if` flags, no runtime feature toggles in MVP.
+
+-----
+
+## 7. DOCUMENTATION STANDARDS
+
+### In-Code Documentation
+
+- Every `protocol` definition gets a one-line `///` comment stating its responsibility.
+- Every `@Model` class gets a comment stating what it persists and its relationship to other models.
+- Every non-obvious algorithm (token overlap scoring, cursor management, finalization timer) gets a block comment explaining the invariant it maintains.
+- `// MARK: -` sections are required in any file over 100 lines.
+
+### docs/ Folder
+
+- `SCHEMAS.md` — canonical data shape reference. Update when adding fields to any model.
+- `PARSING.md` — parser pipeline and known limitations. Update when changing `FuzzyMenuOrderParser`.
+- `UX_FLOWS.md` — user-facing flows. Update when changing navigation or adding new flows.
+- `FUTURE_GOALS.md` — deferred features with implementation approaches. Update when a feature moves from future to active.
+- `research/` — domain research that informed architectural decisions. Do not modify historical research files; add new ones.
+
+-----
+
+## 8. PROJECT: WhisperTicket
+
+> **Claude Code directive:** When working in this repository, read sections 8.1
+> through 8.14 completely before touching any file. The bugs described in section
+> 8.12 are active and their root causes are documented. Do not attempt fixes without
+> reading the relevant subsection first. Many past debugging sessions failed because
+> the transcription lifecycle and cursor management contracts were not understood
+> upfront.
+
+-----
+
+### 8.1 App Overview & Purpose
+
+WhisperTicket is an iOS waitstaff voice ordering application. A server taps a table on the floor plan, selects a seat, presses a record button, speaks the order aloud, and the app:
+
+1. Captures audio via `AVAudioEngine`
+1. Transcribes speech via Apple’s `SFSpeechRecognizer` (on-device, no cloud cost)
+1. Parses the transcript against the loaded menu using fuzzy token matching
+1. Builds a `TicketDraft` with per-seat `DraftItem` records
+1. Allows the server to review, edit, and confirm
+1. Persists as a `Ticket` (SwiftData) with `GuestSeat` children
+1. Displays on a live floor plan with status-colored table tiles
+
+**Core UX contract:** The server looks at the guest, not the screen. Voice capture must be reliable, forgiving, and non-destructive. Transcripts must accumulate — never reset — between button presses for the same seat.
+
+**Deployment target:** iOS 17.0. Swift 5.9. Xcode 15+. `project.yml` → xcodegen → `.xcodeproj`.
+
+**Note on recording model:** The app uses a tap-to-start / tap-to-stop model (not hold-to-talk). The server presses once to begin, speaks the full order for a seat, then presses again to stop. Multiple presses for the same seat accumulate transcript — they do not reset it.
+
+-----
+
+### 8.2 Full Stack Map
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    WhisperTicketApp                      │
+│  Builds ModelContainer + all services → injects via env  │
+└───────────────────┬─────────────────────────────────────┘
+                    │ @Environment(\.appServices)
+        ┌───────────┼────────────────┐
+        │           │                │
+   FloorView   TicketsListView  MenuAdminView
+        │
+   TableOrderEntryView  ──→  LiveSessionViewModel
+        │                         │
+        │              ┌──────────┼──────────────┐
+        │         AudioCapture  Transcription   Parser
+        │         Service       Service         (Fuzzy)
+        │              │              │
+        │         AVAudioEngine  SFSpeechRecognizer
+        │
+   TicketEditorView  ──→  TicketEditorViewModel
+        │                         │
+        │                    Repository (SwiftData)
+        │
+   SeatMapView (drag-drop seat reassignment)
+```
+
+**Services and their concrete implementations (Phase 1):**
+
+|Protocol                      |Concrete Class                |Notes                         |
+|------------------------------|------------------------------|------------------------------|
+|`AudioCaptureServiceProtocol` |`AudioCaptureService`         |AVAudioEngine tap             |
+|`TranscriptionServiceProtocol`|`SFSpeechTranscriptionService`|On-device ASR                 |
+|`OrderParserProtocol`         |`FuzzyMenuOrderParser`        |Token overlap                 |
+|`MenuStoreProtocol`           |`LocalBundleMenuStore`        |UserDefaults + bundle fallback|
+|`TicketRepositoryProtocol`    |`SwiftDataTicketRepository`   |SwiftData/SQLite              |
+|`UpsellEngineProtocol`        |`RuleBasedUpsellEngine`       |Rule-based suggestions        |
+|`MenuImportServiceProtocol`   |`PDFMenuImportService`        |PDFKit text extraction        |
+
+-----
+
+### 8.3 Data Flow Architecture
+
+#### Recording Session Data Flow (Happy Path)
+
+```
+[Record Button Pressed]
+        ↓
+LiveSessionViewModel.startRecording()
+  → captures priorSeatTranscript = seatTranscripts[activeSeatNumber] ?? ""
+  → sets draft.consumedCursor
+  → AudioCaptureService.startCapture()
+  → SFSpeechTranscriptionService.startTranscribing(audioPublisher)
+  → subscribes to transcriptionPublisher()
+        ↓
+[User speaks]
+        ↓
+AVAudioEngine tap fires → bufferSubject.send(buffer)
+        ↓
+SFSpeechAudioBufferRecognitionRequest.append(buffer)
+        ↓
+SFSpeechRecognizer fires result callback
+  → builds fullText = accumulatedBase + currentText
+  → sends TranscriptionSegment(text: fullText, isFinal: false/true)
+        ↓
+LiveSessionViewModel.handleTranscriptionSegment(_:)
+  → builds fullText = priorSeatTranscript + segment.text
+  → seatTranscripts[activeSeatNumber] = fullText
+  → FuzzyMenuOrderParser.parseDraft(transcript: fullText, existingDraft: draft, menu: menu)
+  → stamps new DraftItems with activeSeatNumber
+  → refreshUpsells()
+        ↓
+[Record Button Pressed Again]
+        ↓
+LiveSessionViewModel.stopRecording()
+  → AudioCaptureService.stopCapture()
+  → isRecording = false
+  → starts 3-second finalizationTimer
+        ↓
+[3 seconds later]
+LiveSessionViewModel.finalizeTranscription()
+  → transcriptionService.stopTranscribing()
+  → if no items parsed for seat: adds cleaned transcript as fallback item
+```
+
+#### Ticket Creation Flow
+
+```
+[Server taps "Confirm" / "Review & Send"]
+        ↓
+SwiftDataTicketRepository.createTicket(from: draft, serverId:)
+  → creates Ticket @Model
+  → for each seatNumber in draft.items:
+      creates GuestSeat @Model
+      creates TicketItem @Model for each DraftItem
+      creates TicketModifier @Model for each modifier
+  → unseated items go to seat 1
+  → sets ticket.rawTranscript = draft.aggregateTranscript
+  → modelContext.insert(ticket)
+  → modelContext.save()
+```
+
+-----
+
+### 8.4 Transcription Service — Critical Knowledge
+
+> **This is the most important section. Read it before touching anything related to recording.**
+
+#### SFSpeechRecognizer Constraints (Apple Platform Limits)
+
+1. **~60 second hard limit per recognition task.** Apple terminates the task and fires `isFinal = true`. This is not an error — it is expected behavior. The service handles this with `accumulatedBase` accumulation and auto-restart via `beginRecognitionTask()`.
+1. **On-device recognition is set** (`requiresOnDeviceRecognition = true`). This means: no network required, no data leaves the device, but accuracy is slightly lower than cloud recognition and the on-device model must be downloaded on first use (iOS handles this automatically).
+1. **The recognizer emits partial results continuously** (`shouldReportPartialResults = true`). Every word fires a new segment. The `isFinal` flag only fires when the task ends (time limit or silence detection).
+1. **Silence detection is built into SFSpeechRecognizer.** After approximately 1-2 seconds of silence, the recognizer may finalize the current result and restart. This is the root cause of the “stops and starts” issue reported during development. The restart is handled in `SFSpeechTranscriptionService` via `accumulatedBase`, but the ViewModel’s `priorSeatTranscript` is only captured at `startRecording()` — creating a staleness gap described in BUG-2.
+
+#### The Race Condition (Active Bug — See BUG-1 in 8.12)
+
+```
+Timeline of the bug:
+
+T=0:   Server presses Record
+T=0:   startRecording() captures priorSeatTranscript = "burger fries"
+T=45:  SFSpeechRecognizer auto-fires isFinal (60s limit approaching)
+T=45:  accumulatedBase = "burger fries coke" (correct in service)
+T=45:  beginRecognitionTask() restarts (correct)
+T=60:  Server presses Record again (stop)
+T=60:  stopRecording() → audioCapture.stopCapture() (engine stops)
+T=60:  finalizationTimer starts (3 seconds)
+T=63:  finalizeTranscription() → transcriptionService.stopTranscribing()
+                                             ↑
+                              BUG: new recognition task started at T=45
+                              may still be running. Its isFinal callback
+                              fires after stopTranscribing(), calling
+                              beginRecognitionTask() again on dead audio.
+```
+
+#### The Fix (Implement This)
+
+In `SFSpeechTranscriptionService`, `isSessionActive` must be set to `false` as the FIRST operation in `stopTranscribing()`, and checked at the top of the `isFinal` handler:
+
+```swift
+// In stopTranscribing():
+func stopTranscribing() {
+    isSessionActive = false          // MUST be first — gates the isFinal handler
+    storedAudioPublisher = nil
+    audioCancellable?.cancel()
+    audioCancellable = nil
+    recognitionRequest?.endAudio()   // triggers final drain
+    recognitionTask?.cancel()
+    recognitionRequest = nil
+    recognitionTask = nil
+    accumulatedBase = ""
+}
+
+// In the recognition task callback, isFinal branch:
+if result.isFinal {
+    guard self.isSessionActive else { return }  // ADD THIS LINE
+    self.accumulatedBase = fullText
+    self.recognitionRequest = nil
+    self.recognitionTask = nil
+    try? self.beginRecognitionTask()
+}
+```
+
+#### AVAudioSession Configuration
+
+Current config in `AudioCaptureService.startCapture()`:
+
+```swift
+session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetoothHFP])
+```
+
+This is correct for restaurant environments. `.measurement` mode minimizes audio processing (no noise reduction, no AGC) which gives SFSpeechRecognizer the cleanest possible signal. Do not change this to `.voiceChat` or `.default` — those modes apply processing that degrades transcription accuracy in ambient noise environments.
+
+**Known issue with Bluetooth:** `.allowBluetoothHFP` enables Bluetooth headsets but forces 8kHz sample rate on some devices. If a server uses AirPods, transcription quality may degrade. Consider adding `.allowBluetoothA2DP` or removing Bluetooth options if this becomes a reported problem.
+
+-----
+
+### 8.5 Per-Seat State Management
+
+#### The Seat State Contract
+
+Every seat has exactly one transcript string. That transcript is the complete accumulated speech for that seat across all recording sessions. It must never be reset by pauses, by the recognizer auto-restarting, or by switching to another seat and back.
+
+**Three places that hold seat transcript state (must always be in sync):**
+
+|Location                              |Type           |Owner      |Purpose                |
+|--------------------------------------|---------------|-----------|-----------------------|
+|`LiveSessionViewModel.seatTranscripts`|`[Int: String]`|ViewModel  |UI display, live source|
+|`draft.seatTranscripts`               |`[Int: String]`|TicketDraft|Parser input           |
+|`GuestSeat.rawTranscript`             |`String`       |SwiftData  |Persisted after confirm|
+
+After every call to `handleTranscriptionSegment`, all three must reflect the same value for the active seat. The current code does this correctly:
+
+```swift
+seatTranscripts[activeSeatNumber] = fullText          // ViewModel
+draft.seatTranscripts[activeSeatNumber] = fullText    // Draft
+draft.rawTranscript = fullText                         // Aggregate (legacy compat)
+```
+
+After `parseDraft` replaces the draft struct, the code re-syncs:
+
+```swift
+draft.seatTranscripts = seatTranscripts   // Re-sync after struct replace
+draft.rawTranscript = fullText            // Re-sync
+```
+
+**Do not remove these re-sync lines.** `parseDraft` returns a new `TicketDraft` value and the seat transcripts must be manually restored because the parser replaces the entire struct.
+
+#### Seat Switching
+
+When `activeSeatNumber` changes (server taps a different seat chip), recording must be stopped first. The UI should enforce this — do not allow seat switching while `isRecording == true`. If the seat changes during recording, `priorSeatTranscript` will be captured for the wrong seat on the next `startRecording()` call.
+
+#### Clearing a Seat
+
+`clearSeat(_ seatNumber:)` in `LiveSessionViewModel`:
+
+- Removes all draft items for that seat
+- Removes the seat’s transcript from `seatTranscripts` and `draft.seatTranscripts`
+- Resets `priorSeatTranscript = ""` and `draft.consumedCursor = 0` if the active seat is being cleared
+
+This is correct. Do not skip the cursor reset — if you clear the active seat without resetting the cursor, the parser will skip the next recording entirely because `consumedCursor` points past the new (empty) transcript.
+
+-----
+
+### 8.6 Order Parser — Known Limitations & Fixes
+
+#### How FuzzyMenuOrderParser Works
+
+```
+Input: transcript string, existingDraft, menu
+Output: updated TicketDraft
+
+1. Skip already-processed text using consumedCursor
+2. normalizeText(): lowercase, strip fillers, convert number words to digits
+3. splitIntoSegments(): split on commas and periods
+4. For each segment:
+   a. detectCourse(): check for course keywords → updates currentCourse state
+   b. detectSeat(): check for "seat N" pattern → updates currentSeat state
+   c. findBestItem(): token overlap against all menu items (threshold 0.4)
+   d. extractQuantity(): first digit in segment
+   e. extractModifiers(): temperature phrases + modifier group option names
+   f. build DraftItem, call draft.addItem() (dedup by menuItemId+modifiers+seat)
+5. Set consumedCursor = transcript.count
+```
+
+#### The consumedCursor Contract
+
+`consumedCursor` is the character index in the transcript string up to which the parser has already processed. On each call to `parseDraft`, only `transcript[consumedCursor...]` is processed. After processing, `consumedCursor` is set to `transcript.count`.
+
+**The invariant that must hold:** `consumedCursor` must always reflect the length of text that has been fully parsed. It must be reset to 0 when the transcript is reset (new recording session for a fresh seat), and it must be set to `priorSeatTranscript.count + 1` when resuming a seat that already has text.
+
+**Bug risk:** If `startRecording()` sets `consumedCursor` incorrectly (too high → new words skipped; too low → old text re-parsed and items duplicated), the entire order will be wrong. The safe fix: always derive `consumedCursor` from `seatTranscripts[activeSeatNumber]?.count ?? 0` — the actual stored transcript length — not from `priorSeatTranscript.count` which was captured before any mid-session restarts.
+
+#### Known Parser Limitations
+
+1. **Seat detection requires explicit “seat N” phrasing.** The server must say “seat two, the burger” — not “for her, the burger.” Pronoun resolution is not implemented.
+1. **Course detection is positional and sticky.** Once “entrees:” is detected, all subsequent items are classified as entrees until a new course keyword appears. The parser does not infer course from menu item category.
+1. **Token overlap scoring (0.4 threshold) can produce false positives** with short menu item names. “Soup” correctly matches “Soup of the Day” but also risks matching non-order phrases containing the word “soup.”
+1. **Temperature detection checks multi-word phrases first** (longest-first sort) to avoid “medium” matching before “medium rare” is checked. Do not change this sort order.
+1. **Modifier extraction only captures options defined in the item’s modifierGroups.** If “bacon” is not a modifier option on the Classic Burger, “add bacon” is silently dropped. The embedded demo menu has minimal modifier groups — this needs expansion.
+1. **The parser does not handle negation-with-substitution** (“no onion, add bacon instead”). “No onion” is captured as a negation. “Add bacon instead” depends entirely on whether “bacon” is a modifier option.
+
+#### Improving Modifier Parsing (Recommended Next Step)
+
+**Approach A (extend current parser):** Add a pre-pass that identifies negation chains. “No X, Y, Z” should negate all of X, Y, Z until the chain breaks. Add substitution detection: “instead of X, Y” → negate X, add Y.
+
+**Approach B (OpenAI structured output):** Implement `AIOrderParser` conforming to `OrderParserProtocol`. Send transcript + menu item name + modifier options to GPT-4o with structured JSON schema output. Use as fallback when fuzzy confidence < 0.6. The schema is defined in `docs/research/restaurant-server-workflow.md` section 10.
+
+Recommended: implement Approach A first (free, fast, offline), add Approach B as an opt-in “AI Fill” button (already stubbed in UX_FLOWS.md).
+
+#### Deduplication Logic
+
+`TicketDraft.addItem()` deduplicates by `menuItemId + modifierNames + seatNumber`. Key edge case: if `seatNumber == nil` (unseated) and a new item arrives with `seatNumber == 1`, they will NOT be deduped — this is correct, different seats. But if the same item is parsed twice from the same transcript segment (cursor bug), you get a duplicate — this IS a bug caused by cursor mismanagement, not the dedup logic.
+
+-----
+
+### 8.7 Menu Store & Matching
+
+#### Load Strategy (3-tier fallback)
+
+`LocalBundleMenuStore.loadMenu()` tries in order:
+
+1. **Bundle file** — `MenuV1.sample.json` (or any JSON with “menu” in the name)
+1. **UserDefaults** — previously imported/saved menu
+1. **Embedded Swift string** — `embeddedMenuJSON` hardcoded in `LocalBundleMenuStore.swift`
+
+Strategy 3 means the app always has a working menu even with no bundle file. The embedded menu is a full demo restaurant with Appetizers, Salads, Entrees, Sides, Drinks, and Desserts.
+
+#### Search Index
+
+`buildIndex(from:)` creates two entries per menu item: the item’s own tokens, and pluralized versions (“burgers” matches “Classic Burger”). The index is rebuilt on every `saveMenu()` call.
+
+`findBestMatches(text:maxResults:)` uses token overlap with threshold 0.2 (lower than the parser’s 0.4) because this is used for suggestion/search UI, not for committing items.
+
+#### PDF Menu Import
+
+`PDFMenuImportService` uses PDFKit text extraction — it only works on PDFs with selectable text. Scanned menus (including the Applebee’s PDF in `Menus/`) will fail with the “no readable text” error. For scanned menus, Phase 2 will use OpenAI Vision API (GPT-4o image input). The `StubMenuImportService` placeholder documents the exact implementation steps.
+
+-----
+
+### 8.8 SwiftData — Known Pitfalls
+
+#### Schema and Migration
+
+`WhisperTicketApp.init()` catches `ModelContainer` creation failures and wipes the SQLite store. This is intentional for development velocity — schema changes would otherwise crash on launch. **In production this would cause data loss.** Before shipping to real restaurants, implement `VersionedSchema` and `MigrationPlan`.
+
+The schema: `Ticket`, `GuestSeat`, `TicketItem`, `TicketModifier`, `TicketEditEvent`. All use cascade delete. Deleting a `Ticket` deletes all guests, items, modifiers, and edit events.
+
+#### Threading
+
+`SwiftDataTicketRepository` uses `container.mainContext` — the main actor context. All repository calls are `async` and must be called from `@MainActor` context or with `await`. Do not create a new `ModelContext` on a background thread. SwiftData contexts are not thread-safe.
+
+#### Status Field
+
+`Ticket.status` is stored as `String` (raw value of `TicketStatus` enum). SwiftData cannot store enum types directly. Always use `.rawValue` when writing to `status` and `TicketStatus(rawValue:)` when reading. Use the `ticketStatus` computed property everywhere in UI and business logic — never access `ticket.status` directly outside the repository.
+
+#### SwiftData Crash on Launch
+
+If the app crashes immediately on launch with a SwiftData error:
+
+1. Delete the app from the simulator/device entirely.
+1. Clean build folder (`Cmd+Shift+K`).
+1. Rebuild and run.
+
+If the wipe logic itself crashes, the `fatalError` message will identify which model is failing. Check if a new `@Model` property was added without a default value — SwiftData requires all properties to have defaults or be optional.
+
+-----
+
+### 8.9 SwiftUI Patterns in This Codebase
+
+#### Chrome Design System
+
+All UI uses the Chrome design system defined in `ChromeStyle.swift`. Color tokens:
+
+- `.chromePrimary` — blue-purple accent, primary interactive elements
+- `.chromeTeal` — positive/available states
+- `.chromeAmber` — in-progress/sent states
+- `.chromeSilverHigh` / `.chromeSilverLow` — border gradients
+
+View modifiers:
+
+- `.chromeCard(cornerRadius:glowColor:glowRadius:)` — glass card background
+- `.chromeShimmer()` — animated shimmer for record button / primary CTA
+- `.glowRing(color:radius:)` — colored halo for status elements
+- `.chromeTabBar()` — frosted chrome tab bar appearance
+
+Do not introduce UIKit color literals or hardcoded hex values in SwiftUI views. Always use the token system.
+
+#### Navigation Pattern
+
+Navigation uses `NavigationStack` with `navigationDestination(item:)` (iOS 16+ pattern). Navigation is driven by optional `@State` items — setting the item triggers navigation, clearing it dismisses.
+
+- `FloorView` → `TableOrderEntryView` (via `navigateToOrder: FloorTable?`)
+- `FloorView` → `TicketEditorView` (via `navigateToTicket: Ticket?`)
+
+#### Observable / State Rules
+
+- `@Environment(\.appServices)` — for services (read-only, injected from app root)
+- `@Environment(\.modelContext)` — for SwiftData operations in leaf views (SeatMapView)
+- `@State` — for view-local state and ViewModels
+- `@Binding` — for state owned by a parent (WelcomeView’s `isPresented`)
+
+Do not use `@StateObject` or `@ObservedObject`. This codebase uses Swift 5.9 `@Observable` exclusively.
+
+#### Async Task Pattern
+
+UI-triggered async work uses `.task {}` for lifecycle-bound work and `Task { }` inside button actions. Always use `await`. Never use `DispatchQueue.main.async` for SwiftUI state updates — `@Observable` properties coalesce updates on the main actor automatically.
+
+-----
+
+### 8.10 CI/CD Pipeline
+
+#### Pipeline Overview
+
+`.github/workflows/build.yml` runs on every push to `main` or `develop`, and on PRs to `main`.
+
+Steps:
+
+1. Checkout
+1. Select Xcode (latest-stable)
+1. `brew install xcodegen` — **SLOW, not cached** (Fix 1 below)
+1. `xcodegen generate --spec project.yml` — generates `.xcodeproj`
+1. Install distribution certificate (builds P12 from secrets on runner)
+1. Install provisioning profile
+1. Write ASC API key
+1. `xcodebuild archive` — produces `.xcarchive`
+1. Verify version and bundle resources in archive
+1. Export + upload to TestFlight (main branch only)
+1. Set compliance + distribute to internal beta group (main branch only)
+1. Export IPA only (PR builds)
+1. Upload artifacts
+
+#### CI Time Optimization (Implement These)
+
+**Fix 1 — Cache xcodegen (saves 2-3 min per run):**
+
+```yaml
+- name: Cache xcodegen
+  uses: actions/cache@v4
+  with:
+    path: /usr/local/bin/xcodegen
+    key: xcodegen-${{ runner.os }}-2.36.0
+
+- name: Install xcodegen
+  run: |
+    if ! command -v xcodegen &> /dev/null; then
+      brew install xcodegen
+    fi
+```
+
+**Fix 2 — Cache DerivedData (saves 2-5 min on incremental builds):**
+
+```yaml
+- name: Cache DerivedData
+  uses: actions/cache@v4
+  with:
+    path: ~/Library/Developer/Xcode/DerivedData
+    key: derived-${{ runner.os }}-${{ hashFiles('**/*.swift', 'project.yml') }}
+    restore-keys: derived-${{ runner.os }}-
+```
+
+**Fix 3 — Verify upload condition covers both upload steps.** The TestFlight upload and the compliance/distribute step should both gate on `github.ref == 'refs/heads/main' && github.event_name == 'push'`. Review the workflow to confirm `develop` branch pushes do not trigger uploads.
+
+#### Signing Architecture
+
+The signing uses a custom pattern (not Fastlane, not match):
+
+- `setup-signing.py` — one-time local run to generate cert + profile and push to GitHub Secrets
+- `gen_asc_jwt.py` — generates ES256 JWT for ASC API calls from CI
+- CI runner builds the P12 from stored PEM + DER using macOS LibreSSL
+
+**If the certificate expires or is revoked:** Re-run `setup-signing.py` locally with fresh credentials. It revokes existing certs, creates new ones, and updates all GitHub Secrets automatically.
+
+**If the ASC API key expires (180-day limit):** Generate a new key in App Store Connect, update the `ASC_API_KEY` secret in GitHub.
+
+#### Build Number Strategy
+
+`CURRENT_PROJECT_VERSION` = `${{ github.run_number }}` in CI. This auto-increments and never conflicts with Apple. Do not manually set build numbers. `MARKETING_VERSION` is in `project.yml` — bump this manually before a new App Store version.
+
+#### Common CI Failure Reference
+
+|Error                                    |Cause                         |Fix                                  |
+|-----------------------------------------|------------------------------|-------------------------------------|
+|`xcodegen: command not found`            |Cache miss, brew failed       |Add brew install fallback (Fix 1)    |
+|`Code signing identity not found`        |Expired cert or wrong keychain|Re-run `setup-signing.py`            |
+|`No profiles for 'com.whisperticket.app'`|Profile expired               |Re-run `setup-signing.py`            |
+|`JWT error: 401`                         |ASC key expired               |Generate new key, update secret      |
+|`Build input file not found`             |xcodegen not run or wrong path|Check `project.yml` sources path     |
+|`Module not found: Speech`               |Missing framework             |Add `Speech.framework` to project.yml|
+
+-----
+
+### 8.11 Debugging Protocols
+
+#### Transcription Not Working / Silent Failures
+
+1. Check console for `⚠️ Speech recognition not authorized` — must be `.authorized`.
+1. Check console for `⚠️ Microphone not authorized` — must be `true`.
+1. Check `SFSpeechRecognizer(locale:).isAvailable` — can be `false` if on-device model not downloaded yet. Usually resolves on next launch.
+1. Temporarily add `print` in `bufferSubject.send(buffer)` to confirm audio is flowing. If this fires but no transcription segments arrive, the recognizer is the issue. If this does not fire, the AVAudioEngine is the issue.
+1. Check `audioEngine.isRunning` after `startCapture()`.
+
+#### Items Not Appearing in Draft / Duplicate Items
+
+1. Print `draft.consumedCursor` at the start of each `parseDraft` call. If it equals `transcript.count`, nothing will be parsed — all text is already consumed.
+1. Print the `newText` slice being parsed. Confirm it contains the expected new words.
+1. Print `findBestItem` results for each segment. If score < 0.4, no item is added even if the spoken word sounds correct. The menu item name and the spoken word must share at least 40% of their tokens after normalization.
+1. For duplicates: print `draft.items.map { "\($0.menuItemId)-\($0.seatNumber ?? -1)" }` before and after each parse. Identical entries = dedup failing (cursor bug). Different entries = item is genuinely new.
+
+#### Seat Transcript Not Persisting
+
+1. Confirm `seatTranscripts[activeSeatNumber]` is set in `handleTranscriptionSegment`.
+1. Confirm `draft.seatTranscripts = seatTranscripts` re-sync runs after `parseDraft`.
+1. Confirm `priorSeatTranscript` is correctly captured before `startCapture()` is called.
+1. Confirm `clearSeat()` is not being called inadvertently when switching seats.
+
+#### Floor Plan Not Showing Active Tickets
+
+`FloorView.loadActiveTickets()` fetches all non-closed tickets and maps them by `tableNumber`. If a ticket is not appearing:
+
+1. Confirm `ticket.ticketStatus != .closed`.
+1. Confirm `ticket.tableNumber` exactly matches `table.name` (case-insensitive comparison is used in `FloorPlanStore.table(named:)` but the map key in `loadActiveTickets` is case-sensitive).
+1. Call `await loadActiveTickets()` manually via the refresh button.
+
+-----
+
+### 8.12 Priority Bug List
+
+These are confirmed bugs with documented root causes. Address in this order.
+
+-----
+
+**BUG-1 (CRITICAL): Recognition task restarts after stopTranscribing()**
+
+**Symptom:** Transcription continues briefly after the server stops recording. New items appear in the draft after recording should have stopped. Occasionally a second recording session picks up artifacts from the previous session.
+
+**Root cause:** `stopTranscribing()` calls `recognitionRequest?.endAudio()` which triggers a final drain callback. If the service’s `isFinal` handler fires during the drain, `isSessionActive` may not have been set to `false` yet, causing `beginRecognitionTask()` to fire again on a dead audio engine.
+
+**Fix:** Set `isSessionActive = false` as the FIRST line of `stopTranscribing()`. Add `guard self.isSessionActive else { return }` at the top of the `isFinal` branch in the recognition task callback.
+
+**File:** `ios/WhisperTicket/Services/SFSpeechTranscriptionService.swift`
+
+-----
+
+**BUG-2 (HIGH): Transcript cursor miscalculation after mid-session recognizer restart**
+
+**Symptom:** In noisy environments or after long recordings (>60s), new words spoken after a recognizer auto-restart may be skipped or old text may be re-parsed, causing duplicate items.
+
+**Root cause:** `consumedCursor` is set from `priorSeatTranscript.count` in `startRecording()`. If the recognizer restarts mid-session, `accumulatedBase` grows in the service but `priorSeatTranscript` remains at the pre-session value. On the next Record press, `consumedCursor` is derived from the stale length.
+
+**Fix:** In `LiveSessionViewModel.startRecording()`, change:
+
+```swift
+// Current (fragile):
+draft.consumedCursor = priorSeatTranscript.isEmpty ? 0 : priorSeatTranscript.count + 1
+
+// Fixed (derives from authoritative source):
+let currentTranscriptLength = seatTranscripts[activeSeatNumber]?.count ?? 0
+draft.consumedCursor = currentTranscriptLength == 0 ? 0 : currentTranscriptLength + 1
+```
+
+**File:** `ios/WhisperTicket/ViewModels/LiveSessionViewModel.swift`
+
+-----
+
+**BUG-3 (HIGH): Modifier chains not fully captured**
+
+**Symptom:** “burger no onion add bacon” captures the burger but drops “add bacon” if bacon is not defined as a modifier option in the menu’s `modifierGroups`.
+
+**Root cause:** Modifier extraction only checks options in the item’s `modifierGroups`. Items in the embedded demo menu have minimal modifier coverage.
+
+**Fix (immediate):** Expand `modifier_groups` in the embedded menu JSON in `LocalBundleMenuStore.swift` to include common modifiers (bacon, cheese, onion, tomato, lettuce, sauce options) for burger and other items.
+
+**Fix (long-term):** Implement AI modifier parsing via OpenAI GPT-4o structured output as described in section 8.6.
+
+**Files:** `ios/WhisperTicket/Services/LocalBundleMenuStore.swift` (embedded JSON), `ios/WhisperTicket/Services/FuzzyMenuOrderParser.swift`
+
+-----
+
+**BUG-4 (MEDIUM): Allergy flag not visually prominent after ticket is sent**
+
+**Symptom:** Allergy items show correctly in the live session (red banner), but once the ticket is sent and viewed in `TicketEditorView`, the allergy indicator is not prominently visible to the server before sending to the kitchen.
+
+**Root cause:** `TicketItem.hasAllergyFlag` is persisted but `TicketEditorView` does not render a prominent red badge/banner for flagged items.
+
+**Fix:** In `TicketEditorView`, check `item.hasAllergyFlag` and render:
+
+```swift
+if item.hasAllergyFlag {
+    Label("ALLERGY", systemImage: "exclamationmark.triangle.fill")
+        .font(.caption.bold())
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(.red)
+        .clipShape(Capsule())
+}
+```
+
+If `!item.allergyConfirmed`, add a pulsing animation to make it unmissable.
+
+**File:** `ios/WhisperTicket/Views/` (TicketEditorView — implement if not already present)
+
+-----
+
+**BUG-5 (MEDIUM): CI xcodegen not cached**
+
+**Symptom:** Every CI run spends 2-3 minutes reinstalling xcodegen via brew.
+
+**Root cause:** No `actions/cache` step for the xcodegen binary.
+
+**Fix:** Add cache step from section 8.10 Fix 1.
+
+**File:** `.github/workflows/build.yml`
+
+-----
+
+**BUG-6 (LOW): Token overlap scoring duplicated**
+
+**Symptom:** The same `tokenOverlapScore` algorithm exists in both `FuzzyMenuOrderParser` and `LocalBundleMenuStore`. Changes to the algorithm in one place do not propagate to the other.
+
+**Fix:** Extract into a shared utility — either a free function in a new `StringMatching.swift` file, or an extension on `[String]`. Both classes import it.
+
+**Files:** `ios/WhisperTicket/Services/FuzzyMenuOrderParser.swift`, `ios/WhisperTicket/Services/LocalBundleMenuStore.swift`
+
+-----
+
+### 8.13 Phase 2 Roadmap
+
+Full details in `docs/FUTURE_GOALS.md`. Implementation priority:
+
+|Priority|Feature                       |Effort|Key Integration Point                                       |
+|--------|------------------------------|------|------------------------------------------------------------|
+|1       |QR/NFC table select           |Low   |`FloorView` + CoreNFC entitlement                           |
+|2       |Printer support (ESC/POS)     |Medium|`TicketEditorView` toolbar                                  |
+|3       |AI Order Parser (GPT-4o)      |Medium|`AIOrderParser: OrderParserProtocol`                        |
+|4       |POS integration (Toast/Square)|High  |`POSExportServiceProtocol`                                  |
+|5       |Kitchen display (iPad)        |Medium|Supabase Realtime                                           |
+|6       |Supabase backend              |High  |Replace `SwiftDataTicketRepository` + `LocalBundleMenuStore`|
+|7       |Manager fraud analytics       |Medium|Supabase + ManagerDashboardView                             |
+|8       |Training mode                 |Medium|`TrainingEvaluatorService`                                  |
+|9       |Multilingual support          |High  |`NLLanguageRecognizer` + DeepL                              |
+
+**Phase 2 injection points (where to swap concrete implementations):**
+
+All swaps happen exclusively in `WhisperTicketApp.init()` by changing which concrete type is passed to `AppServices`. No view or ViewModel code changes required for backend swaps — this is the payoff of the protocol architecture.
+
+**OpenAI Vision Menu Import** (immediate Phase 2 unlock): Replace `PDFMenuImportService()` with `OpenAIMenuImportService()` in `AppServices`. The stub in `StubMenuImportService.swift` documents exactly the 5 steps needed.
+
+-----
+
+### 8.14 Files You Must Read Before Touching Each Subsystem
+
+|If you are working on…        |Read these files first                                                                                                                                                                     |
+|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|Transcription (recording, ASR)|`SFSpeechTranscriptionService.swift`, `AudioCaptureService.swift`, `LiveSessionViewModel.swift` (startRecording / stopRecording / handleTranscriptionSegment), **section 8.4 of this file**|
+|Order parsing                 |`FuzzyMenuOrderParser.swift`, `Protocols.swift` (OrderParserProtocol), `docs/PARSING.md`, **section 8.6 of this file**                                                                     |
+|Seat management               |`LiveSessionViewModel.swift` (full file), `TicketDraft.swift`, `Ticket.swift` (GuestSeat), **section 8.5 of this file**                                                                    |
+|Menu loading / matching       |`LocalBundleMenuStore.swift`, `MenuV1.swift`, `docs/SCHEMAS.md`                                                                                                                            |
+|Menu import (PDF)             |`PDFMenuImportService.swift`, `MenuImportService.swift` (stub + Phase 2 steps)                                                                                                             |
+|Ticket persistence            |`SwiftDataTicketRepository.swift`, `Ticket.swift`, **section 8.8 of this file**                                                                                                            |
+|Floor plan                    |`FloorPlanModels.swift`, `FloorPlanStore.swift`, `FloorView.swift`, `FloorPlanEditorView.swift`                                                                                            |
+|UI / Design system            |`ChromeStyle.swift`, **section 8.9 of this file**                                                                                                                                          |
+|CI / Build                    |`build.yml`, `project.yml`, `gen_asc_jwt.py`, `setup-signing.py`, **section 8.10 of this file**                                                                                            |
+|Upsell engine                 |`RuleBasedUpsellEngine.swift`, `MenuV1.swift` (UpsellRule, UpsellCondition)                                                                                                                |
+|SwiftData models              |`Ticket.swift`, **section 8.8 of this file**                                                                                                                                               |
+|Edit history / audit trail    |`Ticket.swift` (TicketEditEvent), `TicketEditorViewModel.swift` (logEdit)                                                                                                                  |
+
+-----
+
+## MERGE NOTE
+
+> The original `CLAUDE.md` in this repository contains additional content that was
+> not accessible during the generation of this document (rate limiting during fetch).
+> When you retrieve the original file, compare it against this document section by
+> section. Any content in the original that is not covered above should be added to
+> the appropriate section. Do not discard any original content — all of it was
+> written intentionally. This document is additive, not a replacement.
+>
+> After merging, remove this note.
+
+-----
+
+*Last updated: April 2026 — Generated from full repository analysis.*
+*Update this file whenever a root cause is identified, a bug is fixed, or an architectural decision changes.*
+Sent from my iPhone
