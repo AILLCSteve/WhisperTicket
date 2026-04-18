@@ -9,163 +9,76 @@ struct LiveSessionView: View {
 
     var body: some View {
         NavigationStack {
-            if let vm {
-                VStack(spacing: 0) {
-                    // Noise warning
-                    if vm.showNoisyEnvironmentWarning {
-                        Label("Loud environment — speak clearly", systemImage: "waveform.badge.exclamationmark")
-                            .font(.caption)
-                            .foregroundStyle(.white)
-                            .padding(8)
-                            .frame(maxWidth: .infinity)
-                            .background(.orange)
-                    }
+            ZStack {
+                Color.chromeBackground.ignoresSafeArea()
 
-                    // Allergy alerts
-                    ForEach(vm.allergyItemsPendingConfirm) { item in
-                        AllergyAlertBanner(item: item) {
-                            vm.confirmAllergyItem(item)
-                        }
-                    }
+                if let vm {
+                    VStack(spacing: 0) {
+                        alertsRow(vm: vm)
 
-                    // Voice macro prompt
-                    if let macro = vm.detectedMacro {
-                        HStack {
-                            Image(systemName: "mic.badge.plus")
-                            Text("Voice command: \(macro.displayName)")
-                            Spacer()
-                            Button("Apply") { vm.applyMacro(macro, previousDraft: nil) }
-                                .buttonStyle(.borderedProminent).tint(.blue)
-                            Button("Dismiss") { vm.detectedMacro = nil }
-                                .buttonStyle(.bordered)
-                        }
-                        .padding()
-                        .background(.blue.opacity(0.1))
-                    }
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 16) {
+                                transcriptCard(vm: vm)
 
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            // Live transcript
-                            GroupBox("Live Transcript") {
-                                Text(vm.activeSeatTranscript.isEmpty
-                                     ? "Hold the button below and speak the order..."
-                                     : vm.activeSeatTranscript)
-                                    .font(.body)
-                                    .foregroundStyle(vm.activeSeatTranscript.isEmpty ? .secondary : .primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .animation(.easeInOut, value: vm.activeSeatTranscript)
-                            }
+                                if !vm.draft.items.isEmpty {
+                                    draftItemsCard(vm: vm)
+                                }
 
-                            // Live ticket draft
-                            if !vm.draft.items.isEmpty {
-                                GroupBox("Order Draft — Table \(tableNumber)") {
-                                    ForEach(vm.draft.items) { item in
-                                        DraftItemRow(item: item) {
-                                            vm.removeItem(item)
-                                        }
+                                if !vm.upsellSuggestions.isEmpty {
+                                    UpsellSuggestionsView(suggestions: vm.upsellSuggestions) { suggestion in
+                                        let item = DraftItem(
+                                            menuItemId: suggestion.menuItem.id,
+                                            name: suggestion.menuItem.name,
+                                            quantity: 1,
+                                            modifierNames: [], negations: [],
+                                            course: .beverage, seatNumber: nil,
+                                            notes: "", confidence: 1.0, hasAllergyFlag: false
+                                        )
+                                        vm.draft.addItem(item)
                                     }
                                 }
                             }
-
-                            // Upsell suggestions
-                            if !vm.upsellSuggestions.isEmpty {
-                                UpsellSuggestionsView(suggestions: vm.upsellSuggestions) { suggestion in
-                                    let item = DraftItem(
-                                        menuItemId: suggestion.menuItem.id,
-                                        name: suggestion.menuItem.name,
-                                        quantity: 1,
-                                        modifierNames: [], negations: [],
-                                        course: .beverage, seatNumber: nil,
-                                        notes: "", confidence: 1.0, hasAllergyFlag: false
-                                    )
-                                    vm.draft.addItem(item)
-                                }
-                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
+                            .padding(.bottom, 160)
                         }
-                        .padding()
+
+                        controlsBar(vm: vm)
                     }
-
-                    Divider()
-
-                    // Controls bar
-                    VStack(spacing: 12) {
-                        if vm.isFinalizingTranscription {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                Text("Processing speech…")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-
-                        if vm.isRecording {
-                            HStack {
-                                Image(systemName: "waveform")
-                                    .foregroundStyle(vm.noiseLevel > 0.75 ? .orange : .green)
-                                ProgressView(value: Double(vm.noiseLevel))
-                                    .tint(vm.noiseLevel > 0.75 ? .orange : .green)
-                                    .frame(width: 120)
-                                Text(vm.noiseLevel > 0.75 ? "Loud" : "Good")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-
-                        HStack(spacing: 20) {
-                            // Confirm = repeat-back + quick send to kitchen
-                            Button {
-                                vm.triggerRepeatBack()
-                            } label: {
-                                Label("Confirm", systemImage: "checkmark.circle")
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.green)
-                            .disabled(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty)
-
-                            // Hold-to-talk
-                            HoldToTalkButton(isRecording: vm.isRecording) {
-                                if vm.isRecording { vm.stopRecording() }
-                                else { vm.startRecording() }
-                            }
-
-                            // Edit = create ticket, go to full editor
-                            Button {
-                                Task { await confirmAndNavigate(vm: vm) }
-                            } label: {
-                                Label("Edit", systemImage: "pencil.circle.fill")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty)
+                    .navigationTitle("Table \(tableNumber)")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackground(Color.chromeBackground, for: .navigationBar)
+                    .toolbarBackground(.visible, for: .navigationBar)
+                    .toolbarColorScheme(.dark, for: .navigationBar)
+                    .sheet(isPresented: Binding(
+                        get: { vm.showRepeatBack },
+                        set: { vm.showRepeatBack = $0 }
+                    )) {
+                        RepeatBackSheet(draft: vm.draft, onAddItem: { itemText in
+                            vm.showRepeatBack = false
+                            vm.addManualItem(name: itemText)
+                        }) {
+                            vm.showRepeatBack = false
+                            Task { await confirmAndSend(vm: vm) }
                         }
                     }
-                    .padding()
-                }
-                .navigationTitle("Table \(tableNumber)")
-                .navigationBarTitleDisplayMode(.inline)
-                .sheet(isPresented: Binding(
-                    get: { vm.showRepeatBack },
-                    set: { vm.showRepeatBack = $0 }
-                )) {
-                    RepeatBackSheet(draft: vm.draft, onAddItem: { itemText in
-                        vm.showRepeatBack = false
-                        vm.addManualItem(name: itemText)
-                    }) {
-                        // "Confirm & Send" tapped — create ticket and fire to kitchen
-                        vm.showRepeatBack = false
-                        Task { await confirmAndSend(vm: vm) }
+                    .navigationDestination(item: $navigateToEditor) { ticket in
+                        TicketEditorView(ticket: ticket)
+                    }
+                    .alert("Error", isPresented: Binding(
+                        get: { createTicketError != nil },
+                        set: { if !$0 { createTicketError = nil } }
+                    )) {
+                        Button("OK") { createTicketError = nil }
+                    } message: {
+                        Text(createTicketError ?? "")
+                    }
+                } else {
+                    VStack(spacing: 16) {
+                        ProgressView().tint(Color.chromePrimary)
+                        Text("Setting up…").font(.callout).foregroundStyle(Color.chromeSilverLow)
                     }
                 }
-                .navigationDestination(item: $navigateToEditor) { ticket in
-                    TicketEditorView(ticket: ticket)
-                }
-                .alert("Error", isPresented: Binding(
-                    get: { createTicketError != nil },
-                    set: { if !$0 { createTicketError = nil } }
-                )) {
-                    Button("OK") { createTicketError = nil }
-                } message: {
-                    Text(createTicketError ?? "")
-                }
-            } else {
-                ProgressView("Setting up...")
             }
         }
         .task {
@@ -180,24 +93,206 @@ struct LiveSessionView: View {
         }
     }
 
-    /// Edit path: create ticket, navigate to editor for review before sending.
+    // MARK: - Alerts
+
+    @ViewBuilder
+    private func alertsRow(vm: LiveSessionViewModel) -> some View {
+        if vm.showNoisyEnvironmentWarning || !vm.allergyItemsPendingConfirm.isEmpty {
+            VStack(spacing: 0) {
+                if vm.showNoisyEnvironmentWarning {
+                    HStack(spacing: 8) {
+                        Image(systemName: "waveform.badge.exclamationmark").font(.caption.bold())
+                        Text("Loud environment — speak clearly").font(.caption.bold())
+                        Spacer()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(Color.chromeAmber.opacity(0.85))
+                }
+                ForEach(vm.allergyItemsPendingConfirm) { item in
+                    AllergyAlertBanner(item: item) { vm.confirmAllergyItem(item) }
+                }
+            }
+        }
+    }
+
+    // MARK: - Transcript
+
+    @ViewBuilder
+    private func transcriptCard(vm: LiveSessionViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                if vm.isRecording {
+                    Circle().fill(Color.chromeRed).frame(width: 8, height: 8)
+                        .glowRing(color: .chromeRed, radius: 4)
+                }
+                ChromeSectionHeader(
+                    title: vm.isRecording ? "Recording…" : "Transcript",
+                    systemImage: "waveform"
+                )
+                Spacer()
+                if vm.isFinalizingTranscription {
+                    HStack(spacing: 5) {
+                        ProgressView().tint(Color.chromePrimary).scaleEffect(0.65)
+                        Text("Processing…").font(.caption).foregroundStyle(Color.chromeSilverLow)
+                    }
+                }
+            }
+
+            Text(vm.activeSeatTranscript.isEmpty
+                 ? "Tap the mic button and speak the order…"
+                 : vm.activeSeatTranscript)
+                .font(.callout)
+                .foregroundStyle(vm.activeSeatTranscript.isEmpty ? Color.chromeSilverLow.opacity(0.6) : .white)
+                .italic(vm.activeSeatTranscript.isEmpty)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .animation(.easeInOut, value: vm.activeSeatTranscript)
+        }
+        .padding(14)
+        .chromeCard(
+            cornerRadius: 14,
+            glowColor: vm.isRecording ? .chromeRed : .clear,
+            glowRadius: vm.isRecording ? 10 : 0
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(vm.isRecording ? Color.chromeRed.opacity(0.4) : Color.clear, lineWidth: 1.5)
+        )
+        .animation(.easeInOut(duration: 0.2), value: vm.isRecording)
+    }
+
+    // MARK: - Draft Items
+
+    @ViewBuilder
+    private func draftItemsCard(vm: LiveSessionViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ChromeSectionHeader(title: "Order Draft — Table \(tableNumber)", systemImage: "list.bullet.clipboard.fill")
+
+            ForEach(vm.draft.items) { item in
+                HStack(alignment: .top, spacing: 10) {
+                    CourseDot(course: item.course).padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("\(item.quantity)× \(item.name)")
+                                .font(.callout.bold()).foregroundStyle(.white)
+                            ConfidenceDot(confidence: item.confidence)
+                            if item.hasAllergyFlag { ChromeAllergyCapsule() }
+                        }
+                        if !item.modifierNames.isEmpty {
+                            Text(item.modifierNames.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(Color.chromeSilverLow)
+                        }
+                    }
+                    Spacer()
+                    Button { vm.removeItem(item) } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Color.chromeSilverLow.opacity(0.5))
+                            .font(.system(size: 18))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 4)
+                if item.id != vm.draft.items.last?.id {
+                    Divider().background(Color.chromeSilverLow.opacity(0.1))
+                }
+            }
+        }
+        .padding(14)
+        .chromeCard(cornerRadius: 14)
+    }
+
+    // MARK: - Controls Bar
+
+    @ViewBuilder
+    private func controlsBar(vm: LiveSessionViewModel) -> some View {
+        VStack(spacing: 0) {
+            if vm.isRecording || vm.isFinalizingTranscription {
+                HStack {
+                    Spacer()
+                    AudioWaveformView(isActive: vm.isRecording, noiseLevel: vm.noiseLevel)
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+
+            HStack(spacing: 0) {
+                Button { vm.triggerRepeatBack() } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty
+                                             ? Color.chromeSilverLow.opacity(0.4)
+                                             : Color.chromeTeal)
+                        Text("Confirm")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty
+                                             ? Color.chromeSilverLow.opacity(0.4)
+                                             : Color.chromeTeal)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty)
+
+                LiveMicButton(isRecording: vm.isRecording, isDisabled: false) {
+                    if vm.isRecording { vm.stopRecording() }
+                    else { vm.startRecording() }
+                }
+                .frame(maxWidth: .infinity)
+
+                Button { Task { await confirmAndNavigate(vm: vm) } } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty
+                                             ? Color.chromeSilverLow.opacity(0.4)
+                                             : Color.chromePrimary)
+                        Text("Edit")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty
+                                             ? Color.chromeSilverLow.opacity(0.4)
+                                             : Color.chromePrimary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            .background(
+                Color.chromeSurface
+                    .overlay(
+                        Rectangle()
+                            .fill(LinearGradient(
+                                colors: [Color.chromeSilverHigh.opacity(0.10), Color.clear],
+                                startPoint: .top, endPoint: .bottom
+                            ))
+                            .frame(height: 1),
+                        alignment: .top
+                    )
+            )
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 0) }
+        }
+        .animation(.easeInOut(duration: 0.25), value: vm.isRecording)
+    }
+
+    // MARK: - Actions
+
     private func confirmAndNavigate(vm: LiveSessionViewModel) async {
         do {
-            let ticket = try await services.repository.createTicket(
-                from: vm.draft, serverId: "local_server"
-            )
+            let ticket = try await services.repository.createTicket(from: vm.draft, serverId: "local_server")
             navigateToEditor = ticket
         } catch {
             createTicketError = "Could not create ticket: \(error.localizedDescription)"
         }
     }
 
-    /// Confirm path: create ticket AND send to kitchen immediately.
     private func confirmAndSend(vm: LiveSessionViewModel) async {
         do {
-            let ticket = try await services.repository.createTicket(
-                from: vm.draft, serverId: "local_server"
-            )
+            let ticket = try await services.repository.createTicket(from: vm.draft, serverId: "local_server")
             ticket.sentToKitchenAt = Date()
             ticket.status = TicketStatus.sent.rawValue
             try await services.repository.save(ticket)
@@ -208,87 +303,46 @@ struct LiveSessionView: View {
     }
 }
 
-// MARK: - Hold-to-Talk Button
+// MARK: - Hold-to-Talk Button (kept for any legacy callers)
 
 struct HoldToTalkButton: View {
     let isRecording: Bool
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(isRecording ? Color.red : Color.accentColor)
-                    .frame(width: 70, height: 70)
-                    .scaleEffect(isRecording ? 1.1 : 1.0)
-                    .animation(
-                        isRecording
-                            ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true)
-                            : .default,
-                        value: isRecording
-                    )
-                Image(systemName: isRecording ? "stop.circle" : "mic.circle")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.white)
-            }
-        }
-        .buttonStyle(.plain)
+        LiveMicButton(isRecording: isRecording, isDisabled: false, action: action)
     }
 }
 
-// MARK: - Draft Item Row
+// MARK: - Draft Item Row (kept for any legacy callers)
 
 struct DraftItemRow: View {
     let item: DraftItem
     let onRemove: () -> Void
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text("\(item.quantity)x \(item.name)").fontWeight(.medium)
-                    if item.hasAllergyFlag {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                    }
-                    if item.confidence < 0.7 {
-                        Image(systemName: "questionmark.circle").foregroundStyle(.orange)
-                    }
+        HStack(alignment: .top, spacing: 10) {
+            CourseDot(course: item.course).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("\(item.quantity)× \(item.name)").font(.callout.bold()).foregroundStyle(.white)
+                    ConfidenceDot(confidence: item.confidence)
+                    if item.hasAllergyFlag { ChromeAllergyCapsule() }
                 }
                 if !item.modifierNames.isEmpty {
                     Text(item.modifierNames.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(Color.chromeSilverLow)
                 }
-                Text(item.course.displayName)
-                    .font(.caption2)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.blue.opacity(0.15))
-                    .clipShape(Capsule())
             }
             Spacer()
             Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(Color.chromeSilverLow.opacity(0.5))
+                    .font(.system(size: 18))
             }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 4)
-        .background(item.hasAllergyFlag ? Color.red.opacity(0.08) : .clear)
-    }
-}
-
-// MARK: - Allergy Alert Banner
-
-struct AllergyAlertBanner: View {
-    let item: DraftItem
-    let onConfirm: () -> Void
-
-    var body: some View {
-        HStack {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-            Text("ALLERGY: \(item.name)").fontWeight(.bold).foregroundStyle(.red)
-            Spacer()
-            Button("Confirm", action: onConfirm).buttonStyle(.bordered).tint(.red)
-        }
-        .padding()
-        .background(.red.opacity(0.12))
     }
 }
 
@@ -297,8 +351,6 @@ struct AllergyAlertBanner: View {
 struct RepeatBackSheet: View {
     let draft: TicketDraft
     var seatLabels: [Int: String] = [:]
-    /// Called when the server wants to add an item without backing out.
-    /// Receives the typed item text; parent handles dismissing the sheet + adding.
     var onAddItem: ((String) -> Void)? = nil
     let onSendToKitchen: () -> Void
     @Environment(\.dismiss) var dismiss
@@ -308,20 +360,32 @@ struct RepeatBackSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Review the order with your guests before sending to the kitchen.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    orderContent
+            ZStack {
+                Color.chromeBackground.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Review the order with your guests before sending to the kitchen.")
+                            .font(.callout)
+                            .foregroundStyle(Color.chromeSilverLow)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+
+                        orderContent
+                            .padding(.horizontal, 16)
+                    }
+                    .padding(.bottom, 20)
                 }
-                .padding()
             }
             .navigationTitle("Confirm Order")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.chromeBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Edit Order") { dismiss() }
+                        .foregroundStyle(Color.chromeSilverLow)
                 }
                 if onAddItem != nil {
                     ToolbarItem(placement: .bottomBar) {
@@ -330,6 +394,7 @@ struct RepeatBackSheet: View {
                             showAddItem = true
                         } label: {
                             Label("Add Item", systemImage: "plus.circle")
+                                .foregroundStyle(Color.chromePrimary)
                         }
                     }
                 }
@@ -337,10 +402,13 @@ struct RepeatBackSheet: View {
                     Button {
                         onSendToKitchen()
                     } label: {
-                        Label("Send to Kitchen", systemImage: "flame.fill")
-                            .fontWeight(.bold)
+                        HStack(spacing: 6) {
+                            Image(systemName: "flame.fill")
+                            Text("Send")
+                        }
+                        .font(.subheadline.bold())
+                        .foregroundStyle(Color.chromeAmber)
                     }
-                    .tint(.orange)
                 }
             }
             .alert("Add Item", isPresented: $showAddItem) {
@@ -362,104 +430,75 @@ struct RepeatBackSheet: View {
         let unseated = draft.items.filter { $0.seatNumber == nil }
         if !seatedNums.isEmpty || !unseated.isEmpty {
             ForEach(seatedNums, id: \.self) { num in
-                SeatOrderSection(
+                RepeatBackSeatSection(
                     label: seatLabels[num] ?? "Seat \(num)",
                     items: draft.items.filter { $0.seatNumber == num },
                     transcript: draft.seatTranscripts[num]
                 )
             }
             if !unseated.isEmpty {
-                SeatOrderSection(label: "Unassigned", items: unseated, transcript: nil)
+                RepeatBackSeatSection(label: "Unassigned", items: unseated, transcript: nil)
             }
         } else if !draft.aggregateTranscript.isEmpty {
             Text(draft.aggregateTranscript)
-                .font(.body)
-                .padding()
+                .font(.callout)
+                .foregroundStyle(.white)
+                .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .chromeCard(cornerRadius: 12)
         } else {
             Text("No order captured yet.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.chromeSilverLow)
                 .italic()
         }
     }
 }
 
-// MARK: - Seat Order Section
-
-private struct SeatOrderSection: View {
+private struct RepeatBackSeatSection: View {
     let label: String
     let items: [DraftItem]
     let transcript: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(label, systemImage: "person")
-                .font(.subheadline.bold())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.fill")
+                    .font(.caption.bold())
+                    .foregroundStyle(Color.chromePrimary)
+                Text(label)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+            }
 
             if items.isEmpty {
                 if let t = transcript, !t.isEmpty {
-                    Text("Transcript: \"\(t)\"")
-                        .font(.callout).foregroundStyle(.secondary).italic()
+                    Text("\"\(t)\"")
+                        .font(.callout).foregroundStyle(Color.chromeSilverLow).italic()
                 } else {
-                    Text("No items").font(.callout).foregroundStyle(.secondary).italic()
+                    Text("No items").font(.callout).foregroundStyle(Color.chromeSilverLow).italic()
                 }
             } else {
                 ForEach(items) { item in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\u{2022}").foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .top, spacing: 10) {
+                        CourseDot(course: item.course).padding(.top, 5)
+                        VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 6) {
-                                Text("\(item.quantity)\u{00D7} \(item.name)").fontWeight(.medium)
-                                if item.hasAllergyFlag {
-                                    Label("ALLERGY", systemImage: "exclamationmark.triangle.fill")
-                                        .font(.caption2).foregroundStyle(.white)
-                                        .padding(.horizontal, 5).padding(.vertical, 2)
-                                        .background(.red).clipShape(Capsule())
-                                }
+                                Text("\(item.quantity)× \(item.name)").font(.callout.bold()).foregroundStyle(.white)
+                                if item.hasAllergyFlag { ChromeAllergyCapsule() }
                             }
                             if !item.modifierNames.isEmpty {
                                 Text(item.modifierNames.joined(separator: ", "))
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(Color.chromeSilverLow)
                             }
                             if !item.notes.isEmpty {
-                                Text(item.notes).font(.caption).foregroundStyle(.orange).italic()
+                                Text(item.notes).font(.caption).foregroundStyle(Color.chromeAmber.opacity(0.8)).italic()
                             }
                         }
                     }
                 }
             }
         }
-        .padding(12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-// MARK: - Upsell Suggestions View
-
-struct UpsellSuggestionsView: View {
-    let suggestions: [UpsellSuggestionResult]
-    let onAdd: (UpsellSuggestionResult) -> Void
-
-    var body: some View {
-        GroupBox("Suggestions") {
-            ForEach(suggestions) { suggestion in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(suggestion.menuItem.name).fontWeight(.medium)
-                        if let script = suggestion.playbookScript {
-                            Text(script).font(.caption).foregroundStyle(.secondary).italic()
-                        } else {
-                            Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    Button("Add") { onAdd(suggestion) }.buttonStyle(.borderedProminent)
-                }
-                .padding(.vertical, 4)
-            }
-        }
+        .padding(14)
+        .chromeCard(cornerRadius: 14)
     }
 }

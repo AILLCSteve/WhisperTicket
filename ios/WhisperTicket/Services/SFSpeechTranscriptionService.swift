@@ -83,6 +83,17 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         }
     }
 
+    func endAudioInput() {
+        // Seal immediately: prevents isFinal from restarting on dead audio.
+        // Does NOT cancel the task so the drain callback can still deliver the
+        // final partial result before stopTranscribing() cleans up.
+        isSessionActive = false
+        storedAudioPublisher = nil
+        audioCancellable?.cancel()
+        audioCancellable = nil
+        recognitionRequest?.endAudio()
+    }
+
     func stopTranscribing() {
         isSessionActive = false
         storedAudioPublisher = nil

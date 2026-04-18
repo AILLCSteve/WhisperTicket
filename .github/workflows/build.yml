@@ -20,8 +20,23 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Cache xcodegen binary
+        id: cache-xcodegen
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/xcodegen
+          key: xcodegen-${{ runner.os }}-2.36.0
+
       - name: Install xcodegen
+        if: steps.cache-xcodegen.outputs.cache-hit != 'true'
         run: brew install xcodegen
+
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: derived-${{ runner.os }}-${{ hashFiles('**/*.swift', 'project.yml') }}
+          restore-keys: derived-${{ runner.os }}-
 
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml

@@ -5,7 +5,6 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            // Main app
             TabView {
                 FloorView()
                     .tabItem { Label("Floor", systemImage: "tablecells.fill") }
@@ -28,5 +27,6 @@ struct ContentView: View {
             }
         }
         .animation(.spring(duration: 0.45, bounce: 0.1), value: showWelcome)
+        .preferredColorScheme(.dark)
     }
 }

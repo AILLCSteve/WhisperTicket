@@ -17,6 +17,10 @@ protocol AudioCaptureServiceProtocol: AnyObject {
 protocol TranscriptionServiceProtocol: AnyObject {
     func transcriptionPublisher() -> AnyPublisher<TranscriptionSegment, Never>
     func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>) throws
+    /// Immediately seals the session (isSessionActive = false, endAudio) without
+    /// cancelling the existing recognition task. Allows the final drain to deliver
+    /// its last segment before stopTranscribing() cleans up. Call in stopRecording().
+    func endAudioInput()
     func stopTranscribing()
 }
 

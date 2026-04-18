@@ -62,11 +62,10 @@ final class LiveSessionViewModel {
             // multiple times without losing prior speech.
             priorSeatTranscript = seatTranscripts[activeSeatNumber] ?? ""
 
-            // Position the parse cursor so the parser skips already-processed prior text.
-            // If prior text exists, new words start after a space separator (+1).
-            draft.consumedCursor = priorSeatTranscript.isEmpty
-                ? 0
-                : priorSeatTranscript.count + 1
+            // Derive cursor from seatTranscripts (authoritative), not priorSeatTranscript
+            // which can be stale after a mid-session SFSpeechRecognizer auto-restart.
+            let currentTranscriptLength = seatTranscripts[activeSeatNumber]?.count ?? 0
+            draft.consumedCursor = currentTranscriptLength == 0 ? 0 : currentTranscriptLength + 1
 
             try audioCapture.startCapture()
             let audioPublisher = audioCapture.audioBufferPublisher()
@@ -95,7 +94,12 @@ final class LiveSessionViewModel {
         showNoisyEnvironmentWarning = false
         cancellables.removeAll()
 
-        finalizationTimer = Timer.publish(every: 3.0, on: .main, in: .common)
+        // Immediately seal: sets isSessionActive=false and calls endAudio() so no
+        // new recognition task can start on the now-dead audio engine. The existing
+        // task still drains its final result before stopTranscribing() cleans up.
+        transcriptionService.endAudioInput()
+
+        finalizationTimer = Timer.publish(every: 1.5, on: .main, in: .common)
             .autoconnect()
             .first()
             .sink { [weak self] _ in self?.finalizeTranscription() }

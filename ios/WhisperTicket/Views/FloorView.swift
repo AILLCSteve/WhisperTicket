@@ -26,8 +26,9 @@ struct FloorView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
+                .background(Color.chromeBackground)
 
-                Divider()
+                Divider().background(Color.chromeSilverLow.opacity(0.15))
 
                 ZStack {
                     if selectedTab == .map {
@@ -54,6 +55,9 @@ struct FloorView: View {
             }
             .navigationTitle("Floor")
             .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(Color.chromeBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
@@ -143,6 +147,7 @@ struct FloorView: View {
             }
             .padding(.vertical)
         }
+        .background(Color.chromeBackground)
     }
 
     @ViewBuilder
@@ -200,7 +205,7 @@ struct FloorMapEmbedView: View {
                         path.addLine(to: CGPoint(x: size.width, y: y))
                         y += spacing
                     }
-                    ctx.stroke(path, with: .color(.primary.opacity(0.05)), lineWidth: 0.5)
+                    ctx.stroke(path, with: .color(.white.opacity(0.04)), lineWidth: 0.5)
                 }
                 .frame(width: 900, height: 700)
 
@@ -215,7 +220,7 @@ struct FloorMapEmbedView: View {
             }
             .frame(minWidth: 900, minHeight: 700)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color.chromeBackground)
     }
 }
 
@@ -228,26 +233,36 @@ struct MapTableTile: View {
         switch t.ticketStatus {
         case .open: return .chromePrimary
         case .sent: return .chromeAmber
-        case .delivered: return .green
-        case .closed: return .secondary
+        case .delivered: return .chromeTeal
+        case .closed: return .chromeSilverLow
         }
     }
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(table.name).font(.title3.bold())
-            Text("\(table.seats.count)\u{1F465}").font(.caption2)
+        VStack(spacing: 6) {
+            Text(table.name)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+            HStack(spacing: 3) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.chromeSilverLow)
+                Text("\(table.seats.count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.chromeSilverLow)
+            }
             if let ticket {
-                Text(ticket.ticketStatus.rawValue.capitalized)
-                    .font(.caption2.bold())
-                    .foregroundStyle(statusColor)
+                StatusCapsule(status: ticket.ticketStatus)
             } else {
-                Text("Open").font(.caption2).foregroundStyle(Color.chromeTeal)
+                Text("Available")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.5)
+                    .foregroundStyle(Color.chromeTeal)
             }
         }
-        .frame(width: 100, height: 100)
-        .chromeCard(cornerRadius: 16, glowColor: statusColor, glowRadius: ticket != nil ? 10 : 0)
-        .glowRing(color: statusColor, radius: ticket != nil ? 6 : 0)
+        .frame(width: 108, height: 108)
+        .chromeCard(cornerRadius: 18, glowColor: statusColor, glowRadius: ticket != nil ? 14 : 5)
+        .glowRing(color: statusColor, radius: ticket != nil ? 7 : 3)
     }
 }
 
