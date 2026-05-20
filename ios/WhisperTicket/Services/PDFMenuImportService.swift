@@ -41,7 +41,7 @@ final class PDFMenuImportService: MenuImportServiceProtocol {
 
     private func parseTextIntoMenu(_ text: String, restaurantName: String) -> MenuImportResult {
         // Price pattern: optional $ sign, digits, dot, two digits
-        let priceRegex = try! NSRegularExpression(pattern: #"\$?\s*(\d{1,3}(?:\.\d{2}))"#)
+        let priceRegex = try! NSRegularExpression(pattern: #"\$?\s*(\d{1,3}\.\d{2})"#)
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -151,7 +151,7 @@ final class PDFMenuImportService: MenuImportServiceProtocol {
             UpsellRule(
                 id: "rule_drink",
                 condition: UpsellCondition(hasEntree: true, hasDrink: false),
-                suggest: [UpsellSuggestion(tag: "drink", itemId: nil)],
+                suggest: [UpsellSuggestion(tag: "beverage", itemId: nil)],
                 playbookScript: "Can I get you something to drink with that?"
             )
         ]

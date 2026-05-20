@@ -10,6 +10,7 @@ protocol AudioCaptureServiceProtocol: AnyObject {
     func startCapture() throws
     func stopCapture()
     func audioBufferPublisher() -> AnyPublisher<AVAudioPCMBuffer, Never>
+    func interruptionPublisher() -> AnyPublisher<Void, Never>
 }
 
 // MARK: - Transcription

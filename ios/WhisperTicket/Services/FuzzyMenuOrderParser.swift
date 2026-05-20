@@ -51,12 +51,12 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
         let normalized = normalizeText(newText)
         let sentences = splitIntoSegments(normalized)
 
-        var currentCourse: CourseFlag = .entree
+        var explicitCourse: CourseFlag? = nil
         var currentSeat: Int? = nil
 
         for sentence in sentences {
             if let course = detectCourse(in: sentence) {
-                currentCourse = course
+                explicitCourse = course
                 continue
             }
             if let seat = detectSeat(in: sentence) {
@@ -70,6 +70,7 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
                 let mods = extractModifiers(from: sentence, item: matchedItem)
                 let hasAllergy = allergyKeywords.contains { sentence.contains($0) }
                 let kitchenNote = matchedItem.kitchenNoteTemplate ?? ""
+                let course = explicitCourse ?? inferCourse(from: matchedItem)
 
                 let draftItem = DraftItem(
                     menuItemId: matchedItem.id,
@@ -77,7 +78,7 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
                     quantity: qty,
                     modifierNames: mods.map { $0.name },
                     negations: mods.filter { $0.isNegation }.map { $0.name },
-                    course: currentCourse,
+                    course: course,
                     seatNumber: currentSeat,
                     notes: kitchenNote,
                     confidence: score,
@@ -198,14 +199,19 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
                 let modTokens = modName.split(separator: " ").map(String.init)
                 if tokenOverlapScore(query: words, candidate: modTokens) > 0.5 {
                     let isNegation = negationPrefixes.contains { segment.contains("\($0) " + (modTokens.first ?? "")) }
-                    mods.append(ParsedModifier(
-                        name: isNegation ? "No \(modifier.name)" : modifier.name,
-                        isNegation: isNegation
-                    ))
+                    mods.append(ParsedModifier(name: modifier.name, isNegation: isNegation))
                 }
             }
         }
         return mods
+    }
+
+    private func inferCourse(from item: MenuItem) -> CourseFlag {
+        if item.tags.contains("beverage") { return .beverage }
+        if item.tags.contains("dessert") { return .dessert }
+        if item.tags.contains("appetizer") { return .appetizer }
+        if item.tags.contains("side") { return .side }
+        return .entree
     }
 
     private func tokenOverlapScore(query: [String], candidate: [String]) -> Double {

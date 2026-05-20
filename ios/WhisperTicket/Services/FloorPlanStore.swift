@@ -13,9 +13,12 @@ final class FloorPlanStore {
     // MARK: - Persistence
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let plan = try? JSONDecoder().decode(FloorPlan.self, from: data) else { return }
-        floorPlan = plan
+        guard let data = UserDefaults.standard.data(forKey: key) else { return }
+        do {
+            floorPlan = try JSONDecoder().decode(FloorPlan.self, from: data)
+        } catch {
+            print("[FloorPlanStore] Decode error — floor plan reset to default. Error: \(error)")
+        }
     }
 
     func save() {

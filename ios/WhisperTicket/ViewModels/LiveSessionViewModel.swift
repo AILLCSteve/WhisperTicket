@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import Combine
 
+@MainActor
 @Observable
 final class LiveSessionViewModel {
     // Per-seat transcripts: seatNumber → transcript text
@@ -75,6 +76,20 @@ final class LiveSessionViewModel {
             transcriptionCancellable = transcriptionService.transcriptionPublisher()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] segment in self?.handleTranscriptionSegment(segment) }
+
+            audioCapture.interruptionPublisher()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] in
+                    guard let self else { return }
+                    // Audio session was interrupted (phone call etc) — stopCapture()
+                    // was already called inside AudioCaptureService. Reset ViewModel state.
+                    self.isRecording = false
+                    self.isFinalizingTranscription = false
+                    self.noiseLevel = 0.0
+                    self.showNoisyEnvironmentWarning = false
+                    self.errorMessage = "Recording interrupted"
+                }
+                .store(in: &cancellables)
 
             Timer.publish(every: 0.5, on: .main, in: .common)
                 .autoconnect()

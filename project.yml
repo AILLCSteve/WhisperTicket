@@ -49,3 +49,15 @@ targets:
         DEVELOPMENT_TEAM: "M37X5J35F8"
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  WhisperTicketTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ios/WhisperTicketTests
+    settings:
+      base:
+        SWIFT_VERSION: "5.9"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    dependencies:
+      - target: WhisperTicket
