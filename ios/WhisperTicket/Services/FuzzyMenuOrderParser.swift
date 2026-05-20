@@ -3,7 +3,17 @@ import Foundation
 final class FuzzyMenuOrderParser: OrderParserProtocol {
 
     private let allergyKeywords = ["allergy", "allergic", "anaphylactic", "epipen", "cannot eat"]
-    private let fillerWords = Set(["um", "uh", "like", "so", "and", "the", "a", "an", "for"])
+    private let fillerWords = Set(["um", "uh", "like", "so", "the", "a", "an", "for"])
+
+    // Words that look substantial but carry no food meaning — block from off-menu item names.
+    private let nonFoodWords = Set([
+        "lets", "let", "see", "if", "what", "how", "where", "when", "who",
+        "would", "could", "should", "does", "think", "looks", "good",
+        "tell", "know", "going", "really", "very", "some", "any",
+        "have", "get", "more", "much", "many", "other", "same", "that",
+        "this", "those", "these", "there", "then", "than", "but", "not",
+        "also", "plus", "and", "want", "will", "just"
+    ])
 
     private let temperatureMap: [String: String] = [
         "rare": "Rare", "medium rare": "Medium Rare", "med rare": "Medium Rare",
@@ -150,7 +160,14 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
     }
 
     private func splitIntoSegments(_ text: String) -> [String] {
-        text.components(separatedBy: CharacterSet(charactersIn: ",."))
+        // Replace conjunctions with segment separators so "steak and potatoes" → two items.
+        let conjunctionPattern = try! NSRegularExpression(pattern: #"\b(and|plus|also|then)\b"#)
+        let expanded = conjunctionPattern.stringByReplacingMatches(
+            in: text,
+            range: NSRange(text.startIndex..., in: text),
+            withTemplate: ";"
+        )
+        return expanded.components(separatedBy: CharacterSet(charactersIn: ",.;:"))
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
     }
@@ -186,15 +203,14 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
     }
 
     /// Builds a clean, human-readable name for an off-menu item.
-    /// Returns empty string if the segment is too short or is only filler/course/seat phrases.
+    /// Returns empty string if the segment is too short or is only filler/non-food words.
     private func buildOffMenuName(from segment: String) -> String {
-        // Skip pure course or seat identifiers — they're handled separately.
         guard detectCourse(in: segment) == nil, detectSeat(in: segment) == nil else { return "" }
-        // Use TranscriptCleaner to remove ordering preamble ("I would like", etc.).
         let cleaned = TranscriptCleaner.clean(segment)
-        // Require at least one meaningful word (>2 chars, not a filler).
+        // Require at least one word that is >3 chars, not a filler, and not a non-food verb/question word.
         let meaningful = cleaned.split(separator: " ").filter {
-            $0.count > 2 && !fillerWords.contains(String($0).lowercased())
+            let word = String($0).lowercased()
+            return word.count > 3 && !fillerWords.contains(word) && !nonFoodWords.contains(word)
         }
         return meaningful.isEmpty ? "" : cleaned
     }

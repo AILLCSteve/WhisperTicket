@@ -133,6 +133,12 @@ final class LiveSessionViewModel {
         refreshUpsells()
     }
 
+    func updateItem(_ updated: DraftItem) {
+        guard let idx = draft.items.firstIndex(where: { $0.id == updated.id }) else { return }
+        draft.items[idx] = updated
+        refreshUpsells()
+    }
+
     func addManualItem(name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
@@ -196,14 +202,18 @@ final class LiveSessionViewModel {
     // MARK: - Private
 
     private func handleTranscriptionSegment(_ segment: TranscriptionSegment) {
-        // Build the full seat transcript: everything spoken before this recording session
-        // (priorSeatTranscript) + whatever ASR has produced in this session (segment.text).
-        let fullText: String
+        // Build the full seat transcript: prior session text + new ASR output.
+        let candidate: String
         if priorSeatTranscript.isEmpty {
-            fullText = segment.text
+            candidate = segment.text
         } else {
-            fullText = "\(priorSeatTranscript) \(segment.text)"
+            candidate = "\(priorSeatTranscript) \(segment.text)"
         }
+
+        // Never let the transcript go backward. If ASR fires isFinal with an empty or
+        // shorter result (known SFSpeechRecognizer edge case), preserve what we had.
+        let existing = seatTranscripts[activeSeatNumber] ?? ""
+        let fullText = candidate.count >= existing.count ? candidate : existing
 
         seatTranscripts[activeSeatNumber] = fullText
         draft.seatTranscripts[activeSeatNumber] = fullText
@@ -242,9 +252,24 @@ final class LiveSessionViewModel {
         transcriptionService.stopTranscribing()
         isFinalizingTranscription = false
 
-        // If this seat produced no parsed items, add the cleaned transcript as a
-        // fallback item so "Review & Send" always has content for the kitchen.
         let transcript = seatTranscripts[activeSeatNumber] ?? ""
+
+        // Re-evaluate the entire transcript now that recording is done.
+        // Resetting consumedCursor to 0 causes parseDraft to see all text from scratch;
+        // addItem() dedup prevents items already found during live parsing from doubling.
+        if !transcript.isEmpty, let menu = menuStore.menu {
+            draft.consumedCursor = 0
+            let reparsed = parser.parseDraft(transcript: transcript, existingDraft: draft, menu: menu)
+            draft = reparsed
+            draft.seatTranscripts = seatTranscripts
+            draft.rawTranscript = transcript
+            for i in draft.items.indices where draft.items[i].seatNumber == nil {
+                draft.items[i].seatNumber = activeSeatNumber
+            }
+            refreshUpsells()
+        }
+
+        // Fallback: if still no items, add the cleaned transcript so the kitchen always has content.
         let hasSeatItems = draft.items.contains { $0.seatNumber == activeSeatNumber }
         if !hasSeatItems && !transcript.isEmpty {
             let cleaned = TranscriptCleaner.clean(transcript)

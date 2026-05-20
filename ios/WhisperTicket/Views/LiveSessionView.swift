@@ -6,6 +6,9 @@ struct LiveSessionView: View {
     @State private var vm: LiveSessionViewModel?
     @State private var navigateToEditor: Ticket? = nil
     @State private var createTicketError: String? = nil
+    @State private var editingItem: DraftItem? = nil
+    @State private var showAddItemAlert = false
+    @State private var manualItemName = ""
 
     var body: some View {
         NavigationStack {
@@ -72,6 +75,23 @@ struct LiveSessionView: View {
                         Button("OK") { createTicketError = nil }
                     } message: {
                         Text(createTicketError ?? "")
+                    }
+                    .sheet(item: $editingItem) { item in
+                        ItemEditorSheet(item: item) { updated in
+                            vm.updateItem(updated)
+                        } onRemove: {
+                            vm.removeItem(item)
+                        }
+                    }
+                    .alert("Add Item", isPresented: $showAddItemAlert) {
+                        TextField("Item name", text: $manualItemName)
+                        Button("Add") {
+                            vm.addManualItem(name: manualItemName)
+                            manualItemName = ""
+                        }
+                        Button("Cancel", role: .cancel) { manualItemName = "" }
+                    } message: {
+                        Text("Enter any item name — on menu or off menu")
                     }
                 } else {
                     VStack(spacing: 16) {
@@ -166,44 +186,61 @@ struct LiveSessionView: View {
     @ViewBuilder
     private func draftItemsCard(vm: LiveSessionViewModel) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ChromeSectionHeader(title: "Order Draft — Table \(tableNumber)", systemImage: "list.bullet.clipboard.fill")
+            HStack {
+                ChromeSectionHeader(title: "Order Draft — Table \(tableNumber)", systemImage: "list.bullet.clipboard.fill")
+                Spacer()
+                Button {
+                    showAddItemAlert = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color.chromePrimary)
+                }
+                .buttonStyle(.plain)
+            }
 
             ForEach(vm.draft.items) { item in
-                HStack(alignment: .top, spacing: 10) {
-                    CourseDot(course: item.course).padding(.top, 5)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text("\(item.quantity)× \(item.name)")
-                                .font(.callout.bold())
-                                // Verified menu items: white. Off-menu requests: amber.
-                                .foregroundStyle(item.isOffMenu ? Color.chromeAmber : Color.white)
-                            if item.isOffMenu {
-                                // Amber "?" badge — not on the menu, verify with guest.
-                                Text("?")
-                                    .font(.caption2.bold())
-                                    .foregroundStyle(Color.chromeAmber)
-                                    .padding(.horizontal, 5).padding(.vertical, 2)
-                                    .background(Color.chromeAmber.opacity(0.18), in: Capsule())
-                                    .overlay(Capsule().strokeBorder(Color.chromeAmber.opacity(0.4), lineWidth: 1))
-                            } else {
-                                ConfidenceDot(confidence: item.confidence)
+                Button {
+                    editingItem = item
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        CourseDot(course: item.course).padding(.top, 5)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text("\(item.quantity)× \(item.name)")
+                                    .font(.callout.bold())
+                                    .foregroundStyle(item.isOffMenu ? Color.chromeAmber : Color.white)
+                                if item.isOffMenu {
+                                    Text("?")
+                                        .font(.caption2.bold())
+                                        .foregroundStyle(Color.chromeAmber)
+                                        .padding(.horizontal, 5).padding(.vertical, 2)
+                                        .background(Color.chromeAmber.opacity(0.18), in: Capsule())
+                                        .overlay(Capsule().strokeBorder(Color.chromeAmber.opacity(0.4), lineWidth: 1))
+                                } else {
+                                    ConfidenceDot(confidence: item.confidence)
+                                }
+                                if item.hasAllergyFlag { ChromeAllergyCapsule() }
                             }
-                            if item.hasAllergyFlag { ChromeAllergyCapsule() }
+                            if !item.modifierNames.isEmpty {
+                                Text(item.modifierNames.joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(Color.chromeSilverLow)
+                            }
+                            if !item.notes.isEmpty {
+                                Text(item.notes)
+                                    .font(.caption).foregroundStyle(Color.chromeSilverLow.opacity(0.8))
+                            }
                         }
-                        if !item.modifierNames.isEmpty {
-                            Text(item.modifierNames.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(Color.chromeSilverLow)
-                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(Color.chromeSilverLow.opacity(0.4))
                     }
-                    Spacer()
-                    Button { vm.removeItem(item) } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(Color.chromeSilverLow.opacity(0.5))
-                            .font(.system(size: 18))
-                    }
-                    .buttonStyle(.plain)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
-                .padding(.vertical, 4)
+                .buttonStyle(.plain)
+
                 if item.id != vm.draft.items.last?.id {
                     Divider().background(Color.chromeSilverLow.opacity(0.1))
                 }
@@ -512,5 +549,152 @@ private struct RepeatBackSeatSection: View {
         }
         .padding(14)
         .chromeCard(cornerRadius: 14)
+    }
+}
+
+// MARK: - Item Editor Sheet
+
+struct ItemEditorSheet: View {
+    let item: DraftItem
+    let onSave: (DraftItem) -> Void
+    let onRemove: () -> Void
+
+    @State private var quantity: Int
+    @State private var modifiersText: String
+    @State private var notesText: String
+    @Environment(\.dismiss) private var dismiss
+
+    init(item: DraftItem, onSave: @escaping (DraftItem) -> Void, onRemove: @escaping () -> Void) {
+        self.item = item
+        self.onSave = onSave
+        self.onRemove = onRemove
+        self._quantity = State(initialValue: max(1, item.quantity))
+        self._modifiersText = State(initialValue: item.modifierNames.joined(separator: ", "))
+        self._notesText = State(initialValue: item.notes)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.chromeBackground.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Item name header
+                        VStack(alignment: .leading, spacing: 4) {
+                            ChromeSectionHeader(title: item.name, systemImage: "fork.knife")
+                            if item.isOffMenu {
+                                Text("Off-menu request")
+                                    .font(.caption).foregroundStyle(Color.chromeAmber)
+                            }
+                        }
+                        .padding(14)
+                        .chromeCard(cornerRadius: 14)
+
+                        // Quantity
+                        VStack(alignment: .leading, spacing: 10) {
+                            ChromeSectionHeader(title: "Quantity", systemImage: "number")
+                            HStack {
+                                Button {
+                                    if quantity > 1 { quantity -= 1 }
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundStyle(quantity > 1 ? Color.chromePrimary : Color.chromeSilverLow.opacity(0.4))
+                                }
+                                .buttonStyle(.plain)
+
+                                Text("\(quantity)")
+                                    .font(.title2.bold().monospacedDigit())
+                                    .foregroundStyle(.white)
+                                    .frame(minWidth: 44)
+
+                                Button {
+                                    quantity += 1
+                                } label: {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundStyle(Color.chromePrimary)
+                                }
+                                .buttonStyle(.plain)
+
+                                Spacer()
+                            }
+                        }
+                        .padding(14)
+                        .chromeCard(cornerRadius: 14)
+
+                        // Modifiers
+                        VStack(alignment: .leading, spacing: 10) {
+                            ChromeSectionHeader(title: "Modifications", systemImage: "slider.horizontal.3")
+                            Text("Separate with commas: medium well, no onions, extra sauce")
+                                .font(.caption).foregroundStyle(Color.chromeSilverLow)
+                            TextField("e.g. medium well, extra sauce", text: $modifiersText, axis: .vertical)
+                                .font(.callout)
+                                .foregroundStyle(.white)
+                                .tint(Color.chromePrimary)
+                                .lineLimit(3, reservesSpace: false)
+                        }
+                        .padding(14)
+                        .chromeCard(cornerRadius: 14)
+
+                        // Kitchen notes
+                        VStack(alignment: .leading, spacing: 10) {
+                            ChromeSectionHeader(title: "Kitchen Note", systemImage: "note.text")
+                            TextField("e.g. allergy — no gluten", text: $notesText, axis: .vertical)
+                                .font(.callout)
+                                .foregroundStyle(.white)
+                                .tint(Color.chromePrimary)
+                                .lineLimit(3, reservesSpace: false)
+                        }
+                        .padding(14)
+                        .chromeCard(cornerRadius: 14)
+
+                        // Remove button
+                        Button(role: .destructive) {
+                            onRemove()
+                            dismiss()
+                        } label: {
+                            Label("Remove Item", systemImage: "trash")
+                                .font(.callout.bold())
+                                .foregroundStyle(Color.chromeRed)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(14)
+                        .chromeCard(cornerRadius: 14)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                }
+            }
+            .navigationTitle("Edit Item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.chromeBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundStyle(Color.chromeSilverLow)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        var updated = item
+                        updated.quantity = quantity
+                        updated.modifierNames = modifiersText
+                            .split(separator: ",")
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        updated.notes = notesText.trimmingCharacters(in: .whitespaces)
+                        onSave(updated)
+                        dismiss()
+                    }
+                    .font(.callout.bold())
+                    .foregroundStyle(Color.chromePrimary)
+                }
+            }
+        }
     }
 }

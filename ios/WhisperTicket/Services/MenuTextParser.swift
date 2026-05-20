@@ -76,7 +76,13 @@ struct MenuTextParser {
                 // Could be an item name whose price appears on the next line,
                 // a description, or noise (addresses, hours, etc.).
                 if line.count <= 70 && looksLikeFoodText(line) {
-                    pendingNameLines.append(line)
+                    // Only keep the FIRST food-text line as the name candidate.
+                    // A second food-text line without a price is a description — ignore it
+                    // so descriptions (e.g. "Classic tomato sauce, fresh mozzarella") don't
+                    // get concatenated into the item name.
+                    if pendingNameLines.isEmpty {
+                        pendingNameLines.append(line)
+                    }
                 } else {
                     pendingNameLines = []
                 }
