@@ -6,9 +6,20 @@ struct LiveSessionView: View {
     @State private var vm: LiveSessionViewModel?
     @State private var navigateToEditor: Ticket? = nil
     @State private var createTicketError: String? = nil
-    @State private var editingItem: DraftItem? = nil
+    @State private var activeSheet: ActiveSheet? = nil
     @State private var showAddItemAlert = false
     @State private var manualItemName = ""
+
+    private enum ActiveSheet: Identifiable {
+        case repeatBack
+        case editItem(DraftItem)
+        var id: String {
+            switch self {
+            case .repeatBack: return "repeatBack"
+            case .editItem(let item): return "edit_\(item.id)"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -53,16 +64,27 @@ struct LiveSessionView: View {
                     .toolbarBackground(Color.chromeBackground, for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)
                     .toolbarColorScheme(.dark, for: .navigationBar)
-                    .sheet(isPresented: Binding(
-                        get: { vm.showRepeatBack },
-                        set: { vm.showRepeatBack = $0 }
-                    )) {
-                        RepeatBackSheet(draft: vm.draft, onAddItem: { itemText in
-                            vm.showRepeatBack = false
-                            vm.addManualItem(name: itemText)
-                        }) {
-                            vm.showRepeatBack = false
-                            Task { await confirmAndSend(vm: vm) }
+                    .onChange(of: vm.showRepeatBack) { _, newValue in
+                        if newValue { activeSheet = .repeatBack }
+                    }
+                    .sheet(item: $activeSheet) { sheet in
+                        switch sheet {
+                        case .repeatBack:
+                            RepeatBackSheet(draft: vm.draft, onAddItem: { itemText in
+                                activeSheet = nil
+                                vm.showRepeatBack = false
+                                vm.addManualItem(name: itemText)
+                            }) {
+                                activeSheet = nil
+                                vm.showRepeatBack = false
+                                Task { await confirmAndSend(vm: vm) }
+                            }
+                        case .editItem(let item):
+                            ItemEditorSheet(item: item) { updated in
+                                vm.updateItem(updated)
+                            } onRemove: {
+                                vm.removeItem(item)
+                            }
                         }
                     }
                     .navigationDestination(item: $navigateToEditor) { ticket in
@@ -75,13 +97,6 @@ struct LiveSessionView: View {
                         Button("OK") { createTicketError = nil }
                     } message: {
                         Text(createTicketError ?? "")
-                    }
-                    .sheet(item: $editingItem) { item in
-                        ItemEditorSheet(item: item) { updated in
-                            vm.updateItem(updated)
-                        } onRemove: {
-                            vm.removeItem(item)
-                        }
                     }
                     .alert("Add Item", isPresented: $showAddItemAlert) {
                         TextField("Item name", text: $manualItemName)
@@ -201,7 +216,7 @@ struct LiveSessionView: View {
 
             ForEach(vm.draft.items) { item in
                 Button {
-                    editingItem = item
+                    activeSheet = .editItem(item)
                 } label: {
                     HStack(alignment: .top, spacing: 10) {
                         CourseDot(course: item.course).padding(.top, 5)

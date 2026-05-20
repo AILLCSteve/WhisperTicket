@@ -12,13 +12,23 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
 
     /// Text confirmed by all completed recognition tasks so far in this session.
     private var accumulatedBase = ""
-    /// The last non-empty full transcript received (partial or final) in the current task.
-    /// Guards against isFinal firing with an empty/degraded result after a valid partial
-    /// was already displayed — prevents the transcript from visually blanking mid-session.
+    /// Last non-empty full transcript seen in the current task — guards against
+    /// isFinal firing with an empty/degraded result after valid text was shown.
     private var lastNonEmptyText = ""
     private var isSessionActive = false
-    private var storedAudioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>?
+
+    // MARK: - Audio relay
+    //
+    // A single subscription to the upstream audio publisher persists for the
+    // entire recording session. Each buffer is delivered to whatever
+    // `recognitionRequest` is current at delivery time. This means recognition
+    // task restarts (after isFinal or error) never create an audio gap — the
+    // PassthroughSubject always has an active subscriber so no frames are lost.
     private var audioCancellable: AnyCancellable?
+
+    // Guards against rapid-restart loops when a new task fires isFinal
+    // immediately because it got silence at the start (e.g., during engine warm-up).
+    private var lastRestartDate: Date = .distantPast
 
     static func requestPermission(completion: @escaping (Bool) -> Void) {
         SFSpeechRecognizer.requestAuthorization { status in
@@ -33,37 +43,54 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
     }
 
     func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>) throws {
-        storedAudioPublisher = audioPublisher
         accumulatedBase = ""
         lastNonEmptyText = ""
         isSessionActive = true
+
+        // Subscribe ONCE. The closure always reads self?.recognitionRequest so
+        // hot-swapping requests (on task restart) redirects audio without cancelling
+        // the upstream subscription — no frames dropped at transition boundaries.
+        audioCancellable = audioPublisher.sink { [weak self] buffer in
+            self?.recognitionRequest?.append(buffer)
+        }
+
         try beginRecognitionTask()
     }
 
     private func beginRecognitionTask() throws {
+        guard isSessionActive else { return }
         guard let recognizer, recognizer.isAvailable else {
             throw TranscriptionError.recognizerUnavailable
         }
-        guard storedAudioPublisher != nil else { return }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = true
-        self.recognitionRequest = request
 
-        // Snapshot base at task-start time. Immutable for this closure's lifetime.
+        // Hot-swap: point the persistent audio relay at the new request BEFORE
+        // cancelling the old task, so audio is continuous across the boundary.
+        self.recognitionRequest = request
+        lastRestartDate = Date()
+
+        // Snapshot base at task-start time — immutable for this closure's lifetime.
         let base = accumulatedBase
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self, self.isSessionActive else { return }
 
-            // Handle speech result first.
             if let result {
                 let currentText = result.bestTranscription.formattedString
-                let computed = base.isEmpty ? currentText : "\(base) \(currentText)"
+                let computed: String
+                if base.isEmpty {
+                    computed = currentText
+                } else if currentText.isEmpty {
+                    computed = base
+                } else {
+                    computed = "\(base) \(currentText)"
+                }
 
-                // Never regress: if isFinal fires with empty/degraded text (e.g., on
-                // silence timeout) keep the last valid text already shown in the UI.
+                // Never regress: if isFinal fires with empty/degraded text keep the
+                // last valid transcript already shown in the UI.
                 let textToSend: String
                 if computed.isEmpty {
                     textToSend = self.lastNonEmptyText
@@ -75,23 +102,20 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
                 self.transcriptionSubject.send(TranscriptionSegment(text: textToSend, isFinal: result.isFinal))
 
                 if result.isFinal {
-                    // Use lastNonEmptyText as the new accumulated base so the next task
-                    // starts from the best text we've ever seen, not isFinal's potentially
-                    // empty result.
                     let preserved = self.lastNonEmptyText
-                    self.accumulatedBase = preserved
+                    // Only advance the accumulated base when we actually have text.
+                    // An empty preserved would erase text from previous tasks.
+                    if !preserved.isEmpty {
+                        self.accumulatedBase = preserved
+                    }
                     self.lastNonEmptyText = ""
                     self.recognitionRequest = nil
                     self.recognitionTask = nil
-                    try? self.beginRecognitionTask()
-                    return  // Don't fall through — restart already handled.
+                    self.scheduleRestart()
+                    return
                 }
             }
 
-            // Handle errors during active sessions (e.g., kAFAssistantErrorDomain 209
-            // = silence timeout, or recognizer internal error). Restart immediately to
-            // keep the session alive — do NOT ignore errors as that leaves the audio
-            // appended to a dead request with no transcription output.
             if let _ = error {
                 if !self.lastNonEmptyText.isEmpty {
                     self.accumulatedBase = self.lastNonEmptyText
@@ -99,30 +123,34 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
                 self.lastNonEmptyText = ""
                 self.recognitionRequest = nil
                 self.recognitionTask = nil
-                try? self.beginRecognitionTask()
+                self.scheduleRestart()
             }
         }
+    }
 
-        audioCancellable?.cancel()
-        audioCancellable = storedAudioPublisher?.sink { [weak request] buffer in
-            request?.append(buffer)
+    // Schedules a restart with a back-off when the task fired isFinal too quickly
+    // (< 200 ms after starting), which indicates the recognizer got silence at
+    // the boundary and would loop immediately without a delay.
+    private func scheduleRestart() {
+        guard isSessionActive else { return }
+        let elapsed = Date().timeIntervalSince(lastRestartDate)
+        let delay = elapsed < 0.2 ? 0.25 : 0.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.isSessionActive else { return }
+            try? self.beginRecognitionTask()
         }
     }
 
     func endAudioInput() {
-        // Seal immediately: prevents isFinal from restarting on dead audio.
-        // Does NOT cancel the task so the drain callback can still deliver the
-        // final partial result before stopTranscribing() cleans up.
+        // Seal the session so scheduled restarts are no-ops after this point.
+        // Do NOT cancel audioCancellable here — we want the final partial result
+        // to drain through the existing task before stopTranscribing() cleans up.
         isSessionActive = false
-        storedAudioPublisher = nil
-        audioCancellable?.cancel()
-        audioCancellable = nil
         recognitionRequest?.endAudio()
     }
 
     func stopTranscribing() {
         isSessionActive = false
-        storedAudioPublisher = nil
         audioCancellable?.cancel()
         audioCancellable = nil
         recognitionRequest?.endAudio()
