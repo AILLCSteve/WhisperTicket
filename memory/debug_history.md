@@ -6,6 +6,51 @@
 
 ---
 
+## [2026-05] — SFSpeechTranscriptionService — Transcript Resets on Long Pause — RESOLVED
+
+**Area:** `Services/SFSpeechTranscriptionService.swift`
+**Type:** Bug (ASR session management)
+
+### Context
+Users reported that when they paused mid-sentence (e.g., to look at a menu), the previously spoken words disappeared from the transcript and only the post-pause words were shown. Persistent across multiple fix attempts over several sessions.
+
+### Symptoms
+"I want a steak and... [pause]... some mashed potatoes" → transcript shows only "some mashed potatoes". The full text from before the pause is gone.
+
+### Approaches tried
+- Initial implementation with `accumulatedBase` and restart-on-isFinal — looked correct in theory but bug persisted.
+- Adding `priorSeatTranscript` to the ViewModel to accumulate across sessions — helps for multi-tap but not within a single recording session.
+- Restart logic on `isFinal` — correct but incomplete.
+
+### Root cause (confirmed two-part)
+
+**Part 1 — isFinal with empty result:**
+`SFSpeechRecognizer` fires `isFinal = true` after detecting silence. At this moment, `bestTranscription.formattedString` can return an **empty string** (recognizer completed with no final text — a known edge case on on-device mode). The code computed `fullText = base.isEmpty ? "" : "\(base) \(currentText)"` = `"" \(= "")` when base = "" (first task). The segment with `text = ""` was sent to the ViewModel, which wrote `seatTranscripts[seat] = ""`, **visually clearing the transcript** already displayed. New task started with `accumulatedBase = ""`.
+
+**Part 2 — Errors silently ignored:**
+When `isFinal` fires due to a recognizer timeout/error (e.g., kAFAssistantErrorDomain 209 = no audio/silence), sometimes ONLY an error fires (no result). The old code: `if let error, !self.isSessionActive { stopTranscribing() }`. Since `isSessionActive = true` during active recording, the error was COMPLETELY IGNORED. The recognition task died, future audio was appended to a dead request, and the transcript never updated again.
+
+### Fix applied
+1. Added `lastNonEmptyText: String` — tracks the last non-empty full transcript seen in the current task.
+2. On every partial/final result: use `lastNonEmptyText` as fallback if `computed` is empty — transcript NEVER regresses below the last good value.
+3. On `isFinal`: `accumulatedBase = lastNonEmptyText` (not `fullText` which could be empty).
+4. On ANY error during active session: restart `beginRecognitionTask()` immediately with `accumulatedBase = lastNonEmptyText`.
+5. Added `return` after `isFinal` restart to prevent double-restart if both result and error fire simultaneously.
+
+### Architectural facts confirmed
+- `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true` fires `isFinal = true` after silence (typically 2-4 seconds). The final result CAN be empty or shorter than the last partial.
+- Errors during active sessions MUST trigger a restart, not be ignored. Silence timeout errors are the most common cause of dead recognition chains.
+- The `lastNonEmptyText` pattern prevents any form of transcript regression regardless of what the recognizer returns.
+
+### Watch out
+- The recognizer callback fires on a background thread. `isSessionActive` has no synchronization — read/write races are possible but rare in practice since the main thread only writes it during explicit start/stop.
+- `try? beginRecognitionTask()` silently swallows failures (recognizer unavailable). A noisy environment can cause the recognizer to be temporarily unavailable — add exponential backoff if this becomes an issue.
+
+### Global?
+Yes — this is a general `SFSpeechRecognizer` gotcha (isFinal with empty result, errors silently ignored) applicable to any iOS app using streaming on-device ASR. Copied to `~/.claude/memory/debug_history.md`.
+
+---
+
 ## [2026-03] — Swift/SwiftUI — Smart Quotes in String Literals — RESOLVED
 
 **Area:** All Swift source files

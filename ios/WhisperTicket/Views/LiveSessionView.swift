@@ -174,8 +174,20 @@ struct LiveSessionView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Text("\(item.quantity)× \(item.name)")
-                                .font(.callout.bold()).foregroundStyle(.white)
-                            ConfidenceDot(confidence: item.confidence)
+                                .font(.callout.bold())
+                                // Verified menu items: white. Off-menu requests: amber.
+                                .foregroundStyle(item.isOffMenu ? Color.chromeAmber : Color.white)
+                            if item.isOffMenu {
+                                // Amber "?" badge — not on the menu, verify with guest.
+                                Text("?")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(Color.chromeAmber)
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(Color.chromeAmber.opacity(0.18), in: Capsule())
+                                    .overlay(Capsule().strokeBorder(Color.chromeAmber.opacity(0.4), lineWidth: 1))
+                            } else {
+                                ConfidenceDot(confidence: item.confidence)
+                            }
                             if item.hasAllergyFlag { ChromeAllergyCapsule() }
                         }
                         if !item.modifierNames.isEmpty {

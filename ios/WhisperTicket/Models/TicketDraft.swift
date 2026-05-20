@@ -49,6 +49,14 @@ struct DraftItem: Identifiable {
     var confidence: Double
     var hasAllergyFlag: Bool
     var kitchenNoteTemplate: String?
+
+    /// True for items that did not match any known menu entry —
+    /// off-menu spoken requests, transcript fallbacks, and manually typed items.
+    var isOffMenu: Bool {
+        menuItemId.hasPrefix("offmenu_") ||
+        menuItemId.hasPrefix("transcript_") ||
+        menuItemId.hasPrefix("manual_")
+    }
 }
 
 enum VoiceMacro: String, CaseIterable {

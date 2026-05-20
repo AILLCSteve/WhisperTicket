@@ -8,8 +8,14 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private let transcriptionSubject = PassthroughSubject<TranscriptionSegment, Never>()
 
-    // Auto-restart state
+    // MARK: - Accumulation state
+
+    /// Text confirmed by all completed recognition tasks so far in this session.
     private var accumulatedBase = ""
+    /// The last non-empty full transcript received (partial or final) in the current task.
+    /// Guards against isFinal firing with an empty/degraded result after a valid partial
+    /// was already displayed — prevents the transcript from visually blanking mid-session.
+    private var lastNonEmptyText = ""
     private var isSessionActive = false
     private var storedAudioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>?
     private var audioCancellable: AnyCancellable?
@@ -29,6 +35,7 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
     func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>) throws {
         storedAudioPublisher = audioPublisher
         accumulatedBase = ""
+        lastNonEmptyText = ""
         isSessionActive = true
         try beginRecognitionTask()
     }
@@ -44,36 +51,55 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         request.requiresOnDeviceRecognition = true
         self.recognitionRequest = request
 
-        // Capture the base text at the moment this task starts so the closure
-        // always appends to the correct prefix even across restarts.
+        // Snapshot base at task-start time. Immutable for this closure's lifetime.
         let base = accumulatedBase
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
+            guard let self, self.isSessionActive else { return }
 
+            // Handle speech result first.
             if let result {
                 let currentText = result.bestTranscription.formattedString
-                let fullText = base.isEmpty ? currentText : "\(base) \(currentText)"
-                let segment = TranscriptionSegment(text: fullText, isFinal: result.isFinal)
-                self.transcriptionSubject.send(segment)
+                let computed = base.isEmpty ? currentText : "\(base) \(currentText)"
+
+                // Never regress: if isFinal fires with empty/degraded text (e.g., on
+                // silence timeout) keep the last valid text already shown in the UI.
+                let textToSend: String
+                if computed.isEmpty {
+                    textToSend = self.lastNonEmptyText
+                } else {
+                    textToSend = computed
+                    self.lastNonEmptyText = computed
+                }
+
+                self.transcriptionSubject.send(TranscriptionSegment(text: textToSend, isFinal: result.isFinal))
 
                 if result.isFinal {
-                    if self.isSessionActive {
-                        // Accumulate and restart a new recognition task.
-                        self.accumulatedBase = fullText
-                        self.recognitionRequest = nil
-                        self.recognitionTask = nil
-                        try? self.beginRecognitionTask()
-                    }
-                    // If !isSessionActive, stopTranscribing() already cleaned up.
+                    // Use lastNonEmptyText as the new accumulated base so the next task
+                    // starts from the best text we've ever seen, not isFinal's potentially
+                    // empty result.
+                    let preserved = self.lastNonEmptyText
+                    self.accumulatedBase = preserved
+                    self.lastNonEmptyText = ""
+                    self.recognitionRequest = nil
+                    self.recognitionTask = nil
+                    try? self.beginRecognitionTask()
+                    return  // Don't fall through — restart already handled.
                 }
             }
 
-            if let error, !self.isSessionActive {
-                // Only clean up on error when the session has been explicitly stopped;
-                // transient errors during an active session are handled by the restart path.
-                _ = error // suppress unused-variable warning
-                self.stopTranscribing()
+            // Handle errors during active sessions (e.g., kAFAssistantErrorDomain 209
+            // = silence timeout, or recognizer internal error). Restart immediately to
+            // keep the session alive — do NOT ignore errors as that leaves the audio
+            // appended to a dead request with no transcription output.
+            if let _ = error {
+                if !self.lastNonEmptyText.isEmpty {
+                    self.accumulatedBase = self.lastNonEmptyText
+                }
+                self.lastNonEmptyText = ""
+                self.recognitionRequest = nil
+                self.recognitionTask = nil
+                try? self.beginRecognitionTask()
             }
         }
 
@@ -104,6 +130,7 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         recognitionRequest = nil
         recognitionTask = nil
         accumulatedBase = ""
+        lastNonEmptyText = ""
     }
 }
 

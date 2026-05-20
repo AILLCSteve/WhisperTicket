@@ -56,7 +56,7 @@ struct WhisperTicketApp: App {
                     parser: parser,
                     upsellEngine: upsellEngine,
                     repository: SwiftDataTicketRepository(modelContext: container.mainContext),
-                    menuImporter: PDFMenuImportService(),
+                    menuImporter: UnifiedMenuImportService(),
                     floorPlanStore: floorPlanStore
                 ))
                 .task {
@@ -122,7 +122,7 @@ extension EnvironmentValues {
         parser: FuzzyMenuOrderParser(),
         upsellEngine: RuleBasedUpsellEngine(),
         repository: PlaceholderTicketRepository(),
-        menuImporter: PDFMenuImportService(),
+        menuImporter: UnifiedMenuImportService(),
         floorPlanStore: FloorPlanStore()
     )
 }

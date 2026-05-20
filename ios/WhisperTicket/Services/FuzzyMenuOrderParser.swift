@@ -65,12 +65,14 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
             }
 
             let allItems = menu.categories.flatMap { $0.items }
+            let hasAllergy = allergyKeywords.contains { sentence.contains($0) }
+            let qty = extractQuantity(from: sentence)
+            let course = explicitCourse ?? .entree
+
             if let (matchedItem, score) = findBestItem(in: sentence, from: allItems) {
-                let qty = extractQuantity(from: sentence)
                 let mods = extractModifiers(from: sentence, item: matchedItem)
-                let hasAllergy = allergyKeywords.contains { sentence.contains($0) }
                 let kitchenNote = matchedItem.kitchenNoteTemplate ?? ""
-                let course = explicitCourse ?? inferCourse(from: matchedItem)
+                let inferredCourse = explicitCourse ?? inferCourse(from: matchedItem)
 
                 let draftItem = DraftItem(
                     menuItemId: matchedItem.id,
@@ -78,7 +80,7 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
                     quantity: qty,
                     modifierNames: mods.map { $0.name },
                     negations: mods.filter { $0.isNegation }.map { $0.name },
-                    course: course,
+                    course: inferredCourse,
                     seatNumber: currentSeat,
                     notes: kitchenNote,
                     confidence: score,
@@ -86,6 +88,26 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
                     kitchenNoteTemplate: kitchenNote.isEmpty ? nil : kitchenNote
                 )
                 draft.addItem(draftItem)
+            } else {
+                // No menu match — still capture the request as an off-menu item so the
+                // kitchen sees what was asked even if it is not on the current menu.
+                let offMenuName = buildOffMenuName(from: sentence)
+                if !offMenuName.isEmpty {
+                    let draftItem = DraftItem(
+                        menuItemId: "offmenu_\(UUID().uuidString)",
+                        name: offMenuName,
+                        quantity: qty,
+                        modifierNames: [],
+                        negations: [],
+                        course: course,
+                        seatNumber: currentSeat,
+                        notes: "",
+                        confidence: 0.2,
+                        hasAllergyFlag: hasAllergy,
+                        kitchenNoteTemplate: nil
+                    )
+                    draft.addItem(draftItem)
+                }
             }
         }
 
@@ -108,7 +130,7 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
             if !item.modifierNames.isEmpty {
                 line += " (\(item.modifierNames.joined(separator: ", ")))"
             }
-            if item.hasAllergyFlag { line += " ⚠️ ALLERGY" }
+            if item.hasAllergyFlag { line += " ALLERGY" }
             return line
         }
         return "Table \(draft.tableNumber): " + lines.joined(separator: "; ")
@@ -163,8 +185,21 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
         return best
     }
 
+    /// Builds a clean, human-readable name for an off-menu item.
+    /// Returns empty string if the segment is too short or is only filler/course/seat phrases.
+    private func buildOffMenuName(from segment: String) -> String {
+        // Skip pure course or seat identifiers — they're handled separately.
+        guard detectCourse(in: segment) == nil, detectSeat(in: segment) == nil else { return "" }
+        // Use TranscriptCleaner to remove ordering preamble ("I would like", etc.).
+        let cleaned = TranscriptCleaner.clean(segment)
+        // Require at least one meaningful word (>2 chars, not a filler).
+        let meaningful = cleaned.split(separator: " ").filter {
+            $0.count > 2 && !fillerWords.contains(String($0).lowercased())
+        }
+        return meaningful.isEmpty ? "" : cleaned
+    }
+
     private func extractQuantity(from segment: String) -> Int {
-        // Match digits anywhere in the segment (not just at start)
         let pattern = #"(\d+)\s+\w"#
         if let range = segment.range(of: pattern, options: .regularExpression) {
             let matched = String(segment[range])
@@ -183,7 +218,6 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
         var mods: [ParsedModifier] = []
         let words = segment.split(separator: " ").map(String.init)
 
-        // Detect temperature (check multi-word phrases first)
         let sortedTemps = temperatureMap.sorted { $0.key.count > $1.key.count }
         for (phrase, label) in sortedTemps {
             if segment.contains(phrase) {
@@ -192,7 +226,6 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
             }
         }
 
-        // Detect modifier options from groups
         for group in item.modifierGroups {
             for modifier in group.modifiers {
                 let modName = modifier.name.lowercased()
