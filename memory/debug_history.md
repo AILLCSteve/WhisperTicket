@@ -6,6 +6,121 @@
 
 ---
 
+## [2026-07-01] — Transcript Erasing FINALLY Fixed by Abandoning Streaming ASR — ARCHITECTURE CHANGE
+
+**Area:** `Services/AudioCaptureService.swift`, `Services/SFSpeechTranscriptionService.swift`, `Services/Protocols.swift`, `ViewModels/LiveSessionViewModel.swift`
+**Type:** Architecture (the definitive fix; supersedes all prior transcript-reset entries)
+
+### Context
+The transcript-erase-on-pause bug survived THREE fixes to the streaming design
+(single-source-of-truth, continuous-task rewrite, generation-guarded high-water).
+Per the debugging rule (3+ failed fixes = wrong architecture), the streaming
+`SFSpeechRecognizer` approach itself was the root cause: live partials + silence
+endpointing + multi-segment reconciliation is inherently erase-prone.
+
+### The fix — record-then-transcribe (build 56, v1.5.0)
+Streaming was **torn out entirely** and replaced with the simplest possible design:
+- **AudioCaptureService** = `AVAudioRecorder` writing mic audio to a temp .m4a
+  FILE continuously until `stopRecording() -> URL?`. No recognition during
+  recording, no timers. Metering drives the waveform. Audio in a file can't be lost.
+- **SFSpeechTranscriptionService** = one async `transcribe(fileURL:) -> String`
+  running on-device recognition over the COMPLETE file once
+  (`shouldReportPartialResults = false`, `requiresOnDeviceRecognition = true`).
+- **LiveSessionViewModel** = on stop, transcribe the file and APPEND the result to
+  the active seat (pure concatenation); parse only that chunk once. Erasing is now
+  structurally impossible; duplication path removed (no re-parse of prior text).
+
+### Protocol changes (do NOT revert to streaming)
+- `AudioCaptureServiceProtocol`: `startRecording() throws` / `stopRecording() -> URL?`
+  (removed `audioBufferPublisher`, `startCapture`/`stopCapture`).
+- `TranscriptionServiceProtocol`: single `func transcribe(fileURL:) async throws -> String`
+  (removed the streaming publisher, `startTranscribing(seed:)`, `endAudioInput`,
+  `stopTranscribing`, and the `TranscriptionSegment` struct).
+
+### UX trade-off (intended)
+Transcript no longer streams word-by-word while speaking. User sees waveform +
+"Recording…" during capture, "Processing…" briefly after stop, then the full text.
+The user explicitly chose reliability over live streaming.
+
+### Watch out
+- **Do NOT resurrect streaming `SFSpeechRecognizer` partials.** Every prior
+  transcript-reset entry below refers to the ABANDONED streaming design.
+- If `transcribe` never calls back on empty/silent audio, the continuation could
+  hang (isFinalizingTranscription stuck). SFSpeech normally returns an empty final
+  or errors; add a timeout if a stuck spinner is ever observed.
+- Not yet device-verified (Windows dev box). User must confirm pause-then-resume
+  no longer erases on build 56.
+
+### Global?
+Yes — "for reliable dictation, prefer record-file-then-transcribe over streaming
+partial reconciliation" is a broadly useful iOS speech lesson.
+
+---
+
+## [2026-07-01] — SFSpeechTranscriptionService — Transcript Reset RECURRED — Root Cause = Double Accumulation — RESOLVED
+
+**Area:** `Services/SFSpeechTranscriptionService.swift`, `ViewModels/LiveSessionViewModel.swift`, `Services/Protocols.swift`
+**Type:** Bug (ASR session management) — regression of the [2026-05] entry below
+
+### Context
+The [2026-05] `lastNonEmptyText` fix did NOT fully resolve the reset — user reported it still intermittently drops pre-pause words.
+
+### Root cause (confirmed)
+The full transcript was reconstructed from TWO independent accumulation layers:
+1. Service `accumulatedBase` (across ASR task restarts within a session).
+2. ViewModel `priorSeatTranscript` + a **length-monotonic guard** (`candidate.count >= existing.count ? candidate : existing`) across mic presses.
+
+The length guard only rejected *shorter* candidates. When `SFSpeechRecognizer` **down-revised** a partial (e.g. "I want a steak" → "I want"), `lastNonEmptyText`/base committed the shorter text, and the next task appended to it — pre-pause words lost. The guard could not catch this because the replacement was still *longer* than the existing display once new speech arrived.
+
+### Fix applied — single source of truth in the service
+- `Protocols.TranscriptionServiceProtocol.startTranscribing` now takes a `seed: String` (the seat's existing transcript).
+- Service: `committedText` = seed + all confirmed prior-task text; **only ever grows**. `taskBest` = per-task high-water mark (longest partial this task) so an empty/shorter isFinal cannot erase displayed text. Emitted = `committedText (+ " " + taskBest)`.
+- ViewModel: passes the seed and now assigns `seatTranscripts[seat] = segment.text` directly — the second accumulation layer + length guard are GONE.
+- Added `os.Logger(subsystem: "com.whisperticket.app", category: "ASR")` — capture on device via Console.app / Xcode to verify committed/base growth across restarts.
+
+### Architectural facts confirmed
+- Cursor alignment preserved: `consumedCursor = seedLength + 1` still points past the joining space to the first new char, so `parseDraft` stays incremental.
+- Only ONE implementor (SFSpeechTranscriptionService) and ONE caller (LiveSessionViewModel) of the protocol — no test mocks — so the signature change is safe.
+
+### Verification status
+- CI-verified: compiles, archives, exports signed IPA (GitHub Actions run 28491855388, green).
+- NOT yet device-verified: the reset behavior itself requires a physical device + mic + speech. **User must confirm on-device.** Logs are in place to help.
+
+### Watch out
+Do NOT reintroduce a ViewModel-side transcript accumulation or length guard. The service is the sole owner of the transcript now. Any "never go backward" logic belongs in the service (`committedText` monotonic + `taskBest` high-water).
+
+### Global?
+Yes — "single source of truth for the accumulated transcript; never split accumulation across service + view layer" is a general streaming-ASR lesson. Worth copying to global if it recurs elsewhere.
+
+---
+
+## [2026-07-01] — CI/CD — TestFlight Pipeline Broke After macos-latest → macOS 26 Migration — RESOLVED
+
+**Area:** `.github/workflows/build.yml`
+**Type:** Bug (CI/CD — environment drift, NOT code)
+
+### Context
+After ~6 weeks (last green 2026-05-20), a push failed. No code cause — the `macos-latest` runner label **migrated to macOS 26 on 2026-06-15** (GitHub runner-images #14167), changing the toolchain.
+
+### Three sequential failures, each a distinct root cause
+1. **`Install Distribution certificate`** → `security: SecKeychainItemImport: MAC verification failed during PKCS12 import (wrong password?)`. Cause: bare `openssl` now resolves to **Homebrew OpenSSL 3.x**, which writes a PKCS#12 MAC/PBE that Apple's `security import` (LibreSSL) can't verify. **Fix: pin to `/usr/bin/openssl` (system LibreSSL)** for both the DER→PEM and `pkcs12 -export` calls. Immune to brew drift.
+2. **`Upload to TestFlight`** → `altool ... Cannot determine the Apple ID from Bundle ID 'com.whisperticket.app' ... (19)`. Cause: **a pending ASC agreement** the account holder had to accept (account in restricted state; NOT a code/bundle problem). **Fix: user accepted new terms in App Store Connect.** No workflow change. (Project history `a42c7a9` shows agreements have blocked this pipeline before.)
+3. **`Set compliance & distribute`** → `curl: (56) ... error: 403`. Cause: `curl -sSf` app-lookup got a 403 while the freshly-accepted agreement was still propagating; HTTP/2 masked it as exit 56 and `set -e` killed the step. **Fix: `continue-on-error: true` on this optional post-upload step (IPA already uploaded, compliance via Info.plist) + convert the apps lookup to the documented `--http1.1 -o -w` pattern with graceful `exit 0` on non-200.**
+
+### Architectural facts confirmed
+- `macos-latest` is a MOVING target — expect toolchain regressions on each monthly image rotation. Pin system binaries (`/usr/bin/openssl`) where keychain/LibreSSL compatibility matters.
+- Post-upload ASC bookkeeping (compliance PATCH, betaGroups add) is OPTIONAL — must never fail a build whose `altool` upload already succeeded. Compliance is set via `Info.plist` (`ITSAppUsesNonExemptEncryption=false`).
+- Build often isn't visible in ASC within the 3-min wait window → API group-add skips; internal testers still get the build via TestFlight auto-delivery (if an Internal Testing group exists).
+- altool error 19 on a previously-working pipeline ≈ account-state (agreements/membership), not code.
+
+### Watch out
+Next macOS image rotation may break signing again. If P12 import fails, confirm which `openssl` is in PATH. If `altool` errors 19, check ASC agreements + membership before touching code.
+
+### Global?
+Partially — the `/usr/bin/openssl` P12 fix and "altool 19 = agreements" are general iOS-CI lessons. curl/HTTP2/403 masking already in global CLAUDE.md.
+
+---
+
 ## [2026-05] — SFSpeechTranscriptionService — Transcript Resets on Long Pause — RESOLVED
 
 **Area:** `Services/SFSpeechTranscriptionService.swift`
