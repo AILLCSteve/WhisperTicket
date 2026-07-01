@@ -56,11 +56,18 @@ jobs:
           printf '%s' "${{ secrets.DIST_PRIVATE_KEY_PEM }}" > "$KEY_PATH"
           echo -n "${{ secrets.DIST_CERT_DER_B64 }}" | base64 --decode > "$CERT_DER_PATH"
 
+          # Use the system LibreSSL binary explicitly. On bare `openssl`, the
+          # macos-latest runner now resolves to Homebrew OpenSSL 3.x, which writes
+          # a PKCS#12 whose MAC/PBE `security import` cannot verify ("MAC
+          # verification failed"). /usr/bin/openssl is macOS LibreSSL and produces
+          # a keychain-compatible P12, immune to Homebrew version drift.
+          OPENSSL=/usr/bin/openssl
+
           # Convert DER → PEM so openssl pkcs12 can read it
-          openssl x509 -inform DER -in "$CERT_DER_PATH" -out "$CERT_PEM_PATH"
+          "$OPENSSL" x509 -inform DER -in "$CERT_DER_PATH" -out "$CERT_PEM_PATH"
 
           # Generate P12 using macOS-native LibreSSL — guarantees keychain compatibility
-          openssl pkcs12 -export \
+          "$OPENSSL" pkcs12 -export \
             -in  "$CERT_PEM_PATH" \
             -inkey "$KEY_PATH" \
             -out "$P12_PATH" \
