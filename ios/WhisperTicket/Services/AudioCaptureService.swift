@@ -1,62 +1,71 @@
 import AVFoundation
 import Combine
 
-final class AudioCaptureService: AudioCaptureServiceProtocol {
+/// Records microphone audio to a file, continuously, until told to stop. There is
+/// no live recognition here — capture is just capture. Recorded audio in a file
+/// cannot be "lost" the way a streaming recognition session can, which is the
+/// whole point of the record-then-transcribe design.
+final class AudioCaptureService: NSObject, AudioCaptureServiceProtocol {
     private(set) var isRecording = false
     private(set) var noiseLevel: Float = 0.0
 
-    private let audioEngine = AVAudioEngine()
-    private let bufferSubject = PassthroughSubject<AVAudioPCMBuffer, Never>()
+    private var recorder: AVAudioRecorder?
+    private var meterTimer: Timer?
+    private var currentFileURL: URL?
     private let interruptionSubject = PassthroughSubject<Void, Never>()
     private var interruptionObserver: NSObjectProtocol?
-    private var cancellables = Set<AnyCancellable>()
 
-    func startCapture() throws {
+    func startRecording() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try session.setActive(true)
 
         registerInterruptionObserver()
 
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+        // Unique file per recording so subsequent recordings never overwrite.
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("whisperticket_\(UUID().uuidString).m4a")
+        currentFileURL = url
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self else { return }
-            // Copy the buffer before sending — the engine can reuse the internal PCM
-            // memory before downstream Combine subscribers finish processing it.
-            if let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength),
-               let src = buffer.floatChannelData,
-               let dst = copy.floatChannelData {
-                copy.frameLength = buffer.frameLength
-                let byteCount = Int(buffer.frameLength) * MemoryLayout<Float>.size
-                for ch in 0..<Int(buffer.format.channelCount) {
-                    memcpy(dst[ch], src[ch], byteCount)
-                }
-                self.bufferSubject.send(copy)
-            }
-            self.updateNoiseLevel(buffer: buffer)
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44_100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+
+        let recorder = try AVAudioRecorder(url: url, settings: settings)
+        recorder.isMeteringEnabled = true
+        guard recorder.record() else {
+            throw TranscriptionError.recognizerUnavailable
         }
-
-        audioEngine.prepare()
-        try audioEngine.start()
+        self.recorder = recorder
         isRecording = true
+
+        // Poll metering for the live waveform.
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.updateMeter()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        meterTimer = timer
     }
 
-    func stopCapture() {
+    func stopRecording() -> URL? {
+        meterTimer?.invalidate()
+        meterTimer = nil
+        recorder?.stop()
+        recorder = nil
+        isRecording = false
+        noiseLevel = 0.0
+
         if let observer = interruptionObserver {
             NotificationCenter.default.removeObserver(observer)
             interruptionObserver = nil
         }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        audioEngine.stop()
-        try? AVAudioSession.sharedInstance().setActive(false)
-        isRecording = false
-        noiseLevel = 0.0
-    }
-
-    func audioBufferPublisher() -> AnyPublisher<AVAudioPCMBuffer, Never> {
-        bufferSubject.eraseToAnyPublisher()
+        // Leave the session active; deactivating here can clip the tail of the file.
+        let url = currentFileURL
+        currentFileURL = nil
+        return url
     }
 
     func interruptionPublisher() -> AnyPublisher<Void, Never> {
@@ -64,6 +73,15 @@ final class AudioCaptureService: AudioCaptureServiceProtocol {
     }
 
     // MARK: - Private
+
+    private func updateMeter() {
+        guard let recorder, recorder.isRecording else { return }
+        recorder.updateMeters()
+        // averagePower is in dBFS (-160 silent ... 0 loudest). Map to 0...1.
+        let power = recorder.averagePower(forChannel: 0)
+        let normalized = max(0, (power + 50) / 50)  // -50 dB floor
+        noiseLevel = min(1, normalized)
+    }
 
     private func registerInterruptionObserver() {
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -76,18 +94,9 @@ final class AudioCaptureService: AudioCaptureServiceProtocol {
                   let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
             if type == .began {
-                self.stopCapture()
+                _ = self.stopRecording()
                 self.interruptionSubject.send()
             }
         }
-    }
-
-    private func updateNoiseLevel(buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData?[0] else { return }
-        let frameCount = Int(buffer.frameLength)
-        var rms: Float = 0
-        for i in 0..<frameCount { rms += channelData[i] * channelData[i] }
-        rms = sqrt(rms / Float(frameCount))
-        DispatchQueue.main.async { self.noiseLevel = min(rms * 10, 1.0) }
     }
 }

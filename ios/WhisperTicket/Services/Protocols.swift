@@ -6,32 +6,23 @@ import Combine
 
 protocol AudioCaptureServiceProtocol: AnyObject {
     var isRecording: Bool { get }
+    /// Normalized 0...1 microphone level, for the live waveform.
     var noiseLevel: Float { get }
-    func startCapture() throws
-    func stopCapture()
-    func audioBufferPublisher() -> AnyPublisher<AVAudioPCMBuffer, Never>
+    /// Begin recording microphone audio to a file. Records continuously until
+    /// stopRecording() is called — no timers, no silence handling.
+    func startRecording() throws
+    /// Stop recording and return the finalized audio file URL, or nil if nothing
+    /// was captured. The caller owns the file and should delete it when done.
+    func stopRecording() -> URL?
     func interruptionPublisher() -> AnyPublisher<Void, Never>
 }
 
 // MARK: - Transcription
 
 protocol TranscriptionServiceProtocol: AnyObject {
-    func transcriptionPublisher() -> AnyPublisher<TranscriptionSegment, Never>
-    /// Starts streaming transcription. `seed` is any transcript that already exists
-    /// for the target seat; the service treats it as the immutable prefix so the
-    /// emitted transcript is the single source of truth (prior text + new speech)
-    /// and never regresses. Pass "" for a fresh seat.
-    func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>, seed: String) throws
-    /// Immediately seals the session (isSessionActive = false, endAudio) without
-    /// cancelling the existing recognition task. Allows the final drain to deliver
-    /// its last segment before stopTranscribing() cleans up. Call in stopRecording().
-    func endAudioInput()
-    func stopTranscribing()
-}
-
-struct TranscriptionSegment {
-    let text: String
-    let isFinal: Bool
+    /// Transcribe a complete audio file in one shot — no streaming, no partial
+    /// results, no session state. Returns the full transcript text (may be empty).
+    func transcribe(fileURL: URL) async throws -> String
 }
 
 // MARK: - Order Parser

@@ -31,12 +31,7 @@ final class LiveSessionViewModel {
     private let menuStore: MenuStoreProtocol
     private let upsellEngine: UpsellEngineProtocol
     private var cancellables = Set<AnyCancellable>()
-    private var finalizationTimer: AnyCancellable?
-    private var transcriptionCancellable: AnyCancellable?
-    // Stores transcript text that existed for the active seat before the current
-    // recording session began. New ASR segments are prepended with this so
-    // multiple mic presses accumulate rather than overwrite.
-    private var priorSeatTranscript = ""
+    private var transcriptionTask: Task<Void, Never>?
 
     let noiseWarningThreshold: Float = 0.75
 
@@ -56,70 +51,71 @@ final class LiveSessionViewModel {
         self.upsellEngine = upsellEngine
     }
 
+    /// Start recording microphone audio to a file. Records continuously until
+    /// stopRecording() — no timers, no silence handling. The transcript is produced
+    /// once, on stop, so nothing can erase mid-recording.
     func startRecording() {
         do {
-            // Capture whatever transcript already exists for this seat BEFORE starting ASR.
-            // New ASR segments will be prepended with this text so users can press record
-            // multiple times without losing prior speech.
-            priorSeatTranscript = seatTranscripts[activeSeatNumber] ?? ""
-
-            // Derive cursor from seatTranscripts (authoritative), not priorSeatTranscript
-            // which can be stale after a mid-session SFSpeechRecognizer auto-restart.
-            let currentTranscriptLength = seatTranscripts[activeSeatNumber]?.count ?? 0
-            draft.consumedCursor = currentTranscriptLength == 0 ? 0 : currentTranscriptLength + 1
-
-            try audioCapture.startCapture()
-            let audioPublisher = audioCapture.audioBufferPublisher()
-            // Seed the service with the seat's existing transcript so it owns the
-            // full text (prior speech + new speech) as a single source of truth.
-            try transcriptionService.startTranscribing(audioPublisher: audioPublisher, seed: priorSeatTranscript)
+            try audioCapture.startRecording()
             isRecording = true
-
-            transcriptionCancellable = transcriptionService.transcriptionPublisher()
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] segment in self?.handleTranscriptionSegment(segment) }
+            errorMessage = nil
+            showNoisyEnvironmentWarning = false
 
             audioCapture.interruptionPublisher()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] in
-                    guard let self else { return }
-                    // Audio session was interrupted (phone call etc) — stopCapture()
-                    // was already called inside AudioCaptureService. Reset ViewModel state.
-                    self.isRecording = false
-                    self.isFinalizingTranscription = false
-                    self.noiseLevel = 0.0
-                    self.showNoisyEnvironmentWarning = false
-                    self.errorMessage = "Recording interrupted"
+                    // Phone call etc. Treat like a stop: finalize the file and
+                    // transcribe what was captured so nothing is lost.
+                    self?.finishRecording(interrupted: true)
                 }
                 .store(in: &cancellables)
 
-            Timer.publish(every: 0.5, on: .main, in: .common)
+            Timer.publish(every: 0.3, on: .main, in: .common)
                 .autoconnect()
                 .sink { [weak self] _ in self?.checkNoiseLevel() }
                 .store(in: &cancellables)
 
         } catch {
+            isRecording = false
             errorMessage = "Could not start recording: \(error.localizedDescription)"
         }
     }
 
     func stopRecording() {
-        audioCapture.stopCapture()
+        finishRecording(interrupted: false)
+    }
+
+    /// Stop capture, then transcribe the recorded file once and append the result.
+    private func finishRecording(interrupted: Bool) {
+        guard isRecording else { return }
         isRecording = false
-        isFinalizingTranscription = true
+        cancellables.removeAll()   // stop meter poll + interruption subscription
         noiseLevel = 0.0
         showNoisyEnvironmentWarning = false
-        cancellables.removeAll()
 
-        // Immediately seal: sets isSessionActive=false and calls endAudio() so no
-        // new recognition task can start on the now-dead audio engine. The existing
-        // task still drains its final result before stopTranscribing() cleans up.
-        transcriptionService.endAudioInput()
+        let url = audioCapture.stopRecording()
+        if interrupted {
+            errorMessage = "Recording interrupted — transcribing what was captured."
+        }
 
-        finalizationTimer = Timer.publish(every: 1.5, on: .main, in: .common)
-            .autoconnect()
-            .first()
-            .sink { [weak self] _ in self?.finalizeTranscription() }
+        guard let url else {
+            isFinalizingTranscription = false
+            return
+        }
+
+        isFinalizingTranscription = true
+        transcriptionTask?.cancel()
+        transcriptionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let text = try await self.transcriptionService.transcribe(fileURL: url)
+                self.appendTranscript(text)
+            } catch {
+                self.errorMessage = "Transcription failed: \(error.localizedDescription)"
+            }
+            self.isFinalizingTranscription = false
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     func triggerRepeatBack() {
@@ -161,12 +157,6 @@ final class LiveSessionViewModel {
         draft.items.removeAll { $0.seatNumber == seatNumber }
         seatTranscripts.removeValue(forKey: seatNumber)
         draft.seatTranscripts.removeValue(forKey: seatNumber)
-        // If the active seat is being cleared, reset the prior-session accumulator
-        // so the next recording starts truly fresh.
-        if seatNumber == activeSeatNumber {
-            priorSeatTranscript = ""
-            draft.consumedCursor = 0
-        }
         refreshUpsells()
     }
 
@@ -203,29 +193,33 @@ final class LiveSessionViewModel {
 
     // MARK: - Private
 
-    private func handleTranscriptionSegment(_ segment: TranscriptionSegment) {
-        // The transcription service is the single source of truth: `segment.text`
-        // already contains the seat's prior transcript (the seed) plus new speech,
-        // and is guaranteed never to regress. Display it directly — no second
-        // accumulation layer to drift out of sync.
-        let fullText = segment.text
+    /// Append one completed recording's transcript to the active seat and parse it.
+    /// Pure append + parse-once: nothing re-reads prior audio or re-parses prior
+    /// text, so this can neither erase existing text nor duplicate existing items.
+    private func appendTranscript(_ newText: String) {
+        let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
 
-        seatTranscripts[activeSeatNumber] = fullText
-        draft.seatTranscripts[activeSeatNumber] = fullText
-        draft.rawTranscript = fullText
+        let existing = seatTranscripts[activeSeatNumber] ?? ""
+        let combined = existing.isEmpty ? trimmed : "\(existing) \(trimmed)"
+        seatTranscripts[activeSeatNumber] = combined
+        draft.seatTranscripts[activeSeatNumber] = combined
+        draft.rawTranscript = combined
 
-        if let macro = parser.detectMacro(in: segment.text) {
+        if let macro = parser.detectMacro(in: trimmed) {
             detectedMacro = macro
         }
 
         guard let menu = menuStore.menu else { return }
 
+        // Parse ONLY this recording's chunk (cursor 0 over `trimmed`). Each chunk is
+        // parsed exactly once and its items appended — no re-processing of prior text.
         let previousIds = Set(draft.items.map { $0.id })
-        let updatedDraft = parser.parseDraft(transcript: fullText, existingDraft: draft, menu: menu)
-        draft = updatedDraft
-        // Re-sync per-seat transcripts after parseDraft replaces the draft struct.
-        draft.seatTranscripts = seatTranscripts
-        draft.rawTranscript = fullText
+        draft.consumedCursor = 0
+        var parsed = parser.parseDraft(transcript: trimmed, existingDraft: draft, menu: menu)
+        parsed.seatTranscripts = seatTranscripts
+        parsed.rawTranscript = combined
+        draft = parsed
 
         // Stamp newly added items with the active seat.
         for i in draft.items.indices where !previousIds.contains(draft.items[i].id) {
@@ -236,51 +230,14 @@ final class LiveSessionViewModel {
         let newAllergyItems = draft.items.filter { $0.hasAllergyFlag && !existingIds.contains($0.id) }
         allergyItemsPendingConfirm.append(contentsOf: newAllergyItems)
 
-        refreshUpsells()
-    }
-
-    private func finalizeTranscription() {
-        finalizationTimer?.cancel()
-        finalizationTimer = nil
-        transcriptionCancellable?.cancel()
-        transcriptionCancellable = nil
-        transcriptionService.stopTranscribing()
-        isFinalizingTranscription = false
-
-        let transcript = seatTranscripts[activeSeatNumber] ?? ""
-
-        // Re-evaluate the entire transcript now that recording is done, so items
-        // whose words were split across two streaming partials are still caught.
-        //
-        // parseDraft emits items with seatNumber = nil; the live pass already
-        // stamped this seat's items with activeSeatNumber. If we reparsed now, the
-        // dedup (which compares seatNumber) would see nil != activeSeatNumber and
-        // RE-ADD every item — the "items multiply on every subsequent recording"
-        // bug. So we temporarily un-stamp this seat's items back to nil, making the
-        // full reparse idempotent, then re-stamp. Items from other seats and manual
-        // items are preserved untouched.
-        if !transcript.isEmpty, let menu = menuStore.menu {
-            for i in draft.items.indices where draft.items[i].seatNumber == activeSeatNumber {
-                draft.items[i].seatNumber = nil
-            }
-            draft.consumedCursor = 0
-            let reparsed = parser.parseDraft(transcript: transcript, existingDraft: draft, menu: menu)
-            draft = reparsed
-            draft.seatTranscripts = seatTranscripts
-            draft.rawTranscript = transcript
-            for i in draft.items.indices where draft.items[i].seatNumber == nil {
-                draft.items[i].seatNumber = activeSeatNumber
-            }
-            refreshUpsells()
-        }
-
-        // Fallback: if still no items, add the cleaned transcript so the kitchen always has content.
+        // Fallback: nothing matched this chunk → keep the spoken text as an off-menu
+        // line so the kitchen still sees it. Deterministic id dedups repeats.
         let hasSeatItems = draft.items.contains { $0.seatNumber == activeSeatNumber }
-        if !hasSeatItems && !transcript.isEmpty {
-            let cleaned = TranscriptCleaner.clean(transcript)
+        if !hasSeatItems {
+            let cleaned = TranscriptCleaner.clean(trimmed)
             if !cleaned.isEmpty {
-                let item = DraftItem(
-                    menuItemId: "transcript_\(activeSeatNumber)_\(UUID().uuidString)",
+                var item = DraftItem(
+                    menuItemId: "transcript_\(cleaned.lowercased())",
                     name: cleaned,
                     quantity: 1,
                     modifierNames: [], negations: [],
@@ -288,10 +245,12 @@ final class LiveSessionViewModel {
                     seatNumber: activeSeatNumber,
                     notes: "", confidence: 0.5, hasAllergyFlag: false
                 )
-                draft.items.append(item)
-                refreshUpsells()
+                item.seatNumber = activeSeatNumber
+                draft.addItem(item)
             }
         }
+
+        refreshUpsells()
     }
 
     private func checkNoiseLevel() {
