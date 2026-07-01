@@ -3,26 +3,24 @@ import AVFoundation
 import Combine
 import os
 
-/// On-device streaming transcription with a single source of truth for the
-/// full session transcript.
+/// On-device streaming transcription that records **continuously** until the
+/// caller stops it — like a plain audio recorder, no timers and no
+/// silence-triggered teardown.
 ///
-/// ## Why this design
-/// `SFSpeechRecognizer` restarts recognition tasks mid-session (after a pause it
-/// fires `isFinal`; on silence/timeout it errors). Naively, each restarted task
-/// only transcribes audio recorded *after* the restart, so the text spoken before
-/// the pause disappears — the classic "transcript reset" bug.
+/// ## Why it's built this way
+/// The previous design tore down and recreated the recognition task every time
+/// `SFSpeechRecognizer` fired `isFinal` (which it does after a pause). That
+/// restart dropped audio and, via shared mutable state touched by late callbacks
+/// from dead tasks, erased text that had already been spoken — the "transcript
+/// reset on pause" bug.
 ///
-/// This service guarantees the emitted transcript **never goes backward**:
-///
-/// - `committedText` holds everything confirmed by prior tasks (seeded with any
-///   transcript that already existed for the seat). It only ever grows.
-/// - `taskBest` is the longest partial seen in the *current* task (a per-task
-///   high-water mark), so an isFinal that arrives empty or shorter than an earlier
-///   partial can never erase text that was already displayed.
-/// - The emitted transcript is always `committedText (+ " " + taskBest)`.
-///
-/// Because the service owns the entire transcript, the ViewModel simply displays
-/// what it emits — there is no second accumulation layer to drift out of sync.
+/// This version keeps a single recognition task alive for the whole session.
+/// `requiresOnDeviceRecognition = true` removes the 60-second server limit, so a
+/// single task can run indefinitely. If the recognizer *does* end a segment on
+/// its own (endpointing) or errors, we transparently continue a new segment
+/// **without losing committed text**, and a monotonic `generation` id makes any
+/// late callback from a superseded task a no-op. The emitted transcript therefore
+/// only ever grows within a session.
 final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -30,28 +28,21 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
     private let transcriptionSubject = PassthroughSubject<TranscriptionSegment, Never>()
     private let log = Logger(subsystem: "com.whisperticket.app", category: "ASR")
 
-    // MARK: - Accumulation state (single source of truth)
-
-    /// Everything confirmed by completed recognition tasks in this session,
-    /// including the seed transcript passed at start. Only ever grows.
+    /// Text confirmed by segments that have already ended, seeded with the seat's
+    /// prior transcript. Only ever grows during a session — the single source of
+    /// truth the emitted transcript is built from.
     private var committedText = ""
-    /// Longest partial transcript seen in the *current* task — a per-task
-    /// high-water mark. Guards against isFinal firing empty/degraded after valid
-    /// text was already shown. Reset to "" when a new task begins.
-    private var taskBest = ""
+    /// Longest transcript seen in the CURRENT task (reset per task). Guards against
+    /// an `isFinal` result that arrives shorter than an earlier partial from
+    /// erasing words. Only the current-generation callback ever touches it, so
+    /// there is no cross-task contamination.
+    private var taskHighWater = ""
+    /// Bumped every time a task starts or the session stops, so callbacks from a
+    /// superseded/cancelled task are ignored (prevents dead tasks from clobbering
+    /// state after a continuation restart).
+    private var generation = 0
     private var isSessionActive = false
-
-    // MARK: - Audio relay
-    //
-    // A single subscription to the upstream audio publisher persists for the
-    // entire recording session. Each buffer is delivered to whatever
-    // `recognitionRequest` is current at delivery time, so task restarts never
-    // require re-subscribing to audio.
     private var audioCancellable: AnyCancellable?
-
-    // Timestamp of the last task start, used to back off if a task fires isFinal
-    // almost immediately (silence at the boundary) to avoid a tight restart loop.
-    private var lastRestartDate: Date = .distantPast
 
     static func requestPermission(completion: @escaping (Bool) -> Void) {
         SFSpeechRecognizer.requestAuthorization { status in
@@ -67,21 +58,19 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
 
     func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>, seed: String) throws {
         committedText = seed
-        taskBest = ""
         isSessionActive = true
         log.debug("startTranscribing seed=\(seed.count, privacy: .public) chars")
 
-        // Subscribe ONCE. The closure always reads self?.recognitionRequest so
-        // hot-swapping requests (on task restart) redirects audio without
-        // cancelling the upstream subscription — no re-subscription churn.
+        // Subscribe once for the whole session. The closure always appends to the
+        // current request, so a continuation restart never needs to re-subscribe.
         audioCancellable = audioPublisher.sink { [weak self] buffer in
             self?.recognitionRequest?.append(buffer)
         }
 
-        try beginRecognitionTask()
+        try beginTask()
     }
 
-    private func beginRecognitionTask() throws {
+    private func beginTask() throws {
         guard isSessionActive else { return }
         guard let recognizer, recognizer.isAvailable else {
             throw TranscriptionError.recognizerUnavailable
@@ -90,52 +79,56 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = true
+        recognitionRequest = request
 
-        self.recognitionRequest = request
-        lastRestartDate = Date()
-        taskBest = ""
-
-        // Snapshot the committed prefix for this task's lifetime.
+        generation &+= 1
+        let myGen = generation
         let base = committedText
-        log.debug("beginRecognitionTask base=\(base.count, privacy: .public) chars")
+        taskHighWater = ""
+        log.debug("beginTask gen=\(myGen, privacy: .public) base=\(base.count, privacy: .public) chars")
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self, self.isSessionActive else { return }
+            guard let self, self.isSessionActive, myGen == self.generation else { return }
 
             if let result {
                 let current = result.bestTranscription.formattedString
-                // Per-task high-water mark: never shrink within a task.
-                if current.count > self.taskBest.count {
-                    self.taskBest = current
+                // Never shrink within a task: keep the longest partial seen so an
+                // isFinal that arrives shorter can't erase already-shown words.
+                if current.count > self.taskHighWater.count { self.taskHighWater = current }
+                let full = Self.join(base, self.taskHighWater)
+                if !full.isEmpty {
+                    self.transcriptionSubject.send(TranscriptionSegment(text: full, isFinal: result.isFinal))
                 }
-                let full = Self.join(base, self.taskBest)
-
-                self.transcriptionSubject.send(TranscriptionSegment(text: full, isFinal: result.isFinal))
-
                 if result.isFinal {
-                    self.commitAndRestart(base: base)
+                    // The recognizer ended this segment on its own. Commit its text
+                    // and immediately continue a new segment so recording never
+                    // actually stops until the user stops it.
+                    if !self.taskHighWater.isEmpty { self.committedText = full }
+                    self.continueSegment()
                     return
                 }
             }
 
             if error != nil {
-                self.log.debug("recognition error — restarting; committed=\(self.committedText.count, privacy: .public)")
-                self.commitAndRestart(base: base)
+                self.log.debug("ASR error — continuing; committed=\(self.committedText.count, privacy: .public)")
+                self.continueSegment()
             }
         }
     }
 
-    /// Fold the current task's best text into the permanent committed prefix and
-    /// schedule the next task. `committedText` only ever grows, so no prior text
-    /// can be lost across the restart boundary.
-    private func commitAndRestart(base: String) {
-        if !taskBest.isEmpty {
-            committedText = Self.join(base, taskBest)
-        }
-        taskBest = ""
-        recognitionRequest = nil
+    /// Continue transcription after the recognizer ended a segment, without losing
+    /// any committed text. This is the ONLY restart path — there is no
+    /// silence-timer restart. Bumping `generation` (via beginTask) plus cancelling
+    /// the old task ensures no stale callback can run after this point.
+    private func continueSegment() {
+        guard isSessionActive else { return }
+        recognitionTask?.cancel()
         recognitionTask = nil
-        scheduleRestart()
+        recognitionRequest = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isSessionActive else { return }
+            try? self.beginTask()
+        }
     }
 
     /// Join a committed prefix and a live suffix with a single space, tolerating
@@ -146,30 +139,17 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         return "\(a) \(b)"
     }
 
-    // Schedules a restart with a back-off when the task fired isFinal too quickly
-    // (< 200 ms after starting), which indicates the recognizer got silence at the
-    // boundary and would loop immediately without a delay. Because isFinal fires on
-    // silence, the brief gap loses no real speech.
-    private func scheduleRestart() {
-        guard isSessionActive else { return }
-        let elapsed = Date().timeIntervalSince(lastRestartDate)
-        let delay = elapsed < 0.2 ? 0.25 : 0.0
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, self.isSessionActive else { return }
-            try? self.beginRecognitionTask()
-        }
-    }
-
     func endAudioInput() {
-        // Seal the session so scheduled restarts are no-ops after this point.
-        // Do NOT cancel audioCancellable here — we want the final partial result
-        // to drain through the existing task before stopTranscribing() cleans up.
+        // Seal the session so no continuation restart can start on the now-dead
+        // audio engine. The existing task still drains its final result before
+        // stopTranscribing() cleans up.
         isSessionActive = false
         recognitionRequest?.endAudio()
     }
 
     func stopTranscribing() {
         isSessionActive = false
+        generation &+= 1  // invalidate any in-flight task callback
         audioCancellable?.cancel()
         audioCancellable = nil
         recognitionRequest?.endAudio()
@@ -177,7 +157,7 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         recognitionRequest = nil
         recognitionTask = nil
         committedText = ""
-        taskBest = ""
+        taskHighWater = ""
     }
 }
 

@@ -249,10 +249,20 @@ final class LiveSessionViewModel {
 
         let transcript = seatTranscripts[activeSeatNumber] ?? ""
 
-        // Re-evaluate the entire transcript now that recording is done.
-        // Resetting consumedCursor to 0 causes parseDraft to see all text from scratch;
-        // addItem() dedup prevents items already found during live parsing from doubling.
+        // Re-evaluate the entire transcript now that recording is done, so items
+        // whose words were split across two streaming partials are still caught.
+        //
+        // parseDraft emits items with seatNumber = nil; the live pass already
+        // stamped this seat's items with activeSeatNumber. If we reparsed now, the
+        // dedup (which compares seatNumber) would see nil != activeSeatNumber and
+        // RE-ADD every item — the "items multiply on every subsequent recording"
+        // bug. So we temporarily un-stamp this seat's items back to nil, making the
+        // full reparse idempotent, then re-stamp. Items from other seats and manual
+        // items are preserved untouched.
         if !transcript.isEmpty, let menu = menuStore.menu {
+            for i in draft.items.indices where draft.items[i].seatNumber == activeSeatNumber {
+                draft.items[i].seatNumber = nil
+            }
             draft.consumedCursor = 0
             let reparsed = parser.parseDraft(transcript: transcript, existingDraft: draft, menu: menu)
             draft = reparsed

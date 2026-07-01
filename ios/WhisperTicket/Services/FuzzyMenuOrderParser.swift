@@ -103,8 +103,12 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
                 // kitchen sees what was asked even if it is not on the current menu.
                 let offMenuName = buildOffMenuName(from: sentence)
                 if !offMenuName.isEmpty {
+                    // Deterministic id (by normalized name) so a full-transcript
+                    // reparse dedups the same off-menu request instead of adding a
+                    // fresh random-UUID copy each time.
+                    let offMenuSlug = offMenuName.lowercased().replacingOccurrences(of: " ", with: "_")
                     let draftItem = DraftItem(
-                        menuItemId: "offmenu_\(UUID().uuidString)",
+                        menuItemId: "offmenu_\(offMenuSlug)",
                         name: offMenuName,
                         quantity: qty,
                         modifierNames: [],
