@@ -70,7 +70,9 @@ final class LiveSessionViewModel {
 
             try audioCapture.startCapture()
             let audioPublisher = audioCapture.audioBufferPublisher()
-            try transcriptionService.startTranscribing(audioPublisher: audioPublisher)
+            // Seed the service with the seat's existing transcript so it owns the
+            // full text (prior speech + new speech) as a single source of truth.
+            try transcriptionService.startTranscribing(audioPublisher: audioPublisher, seed: priorSeatTranscript)
             isRecording = true
 
             transcriptionCancellable = transcriptionService.transcriptionPublisher()
@@ -202,18 +204,11 @@ final class LiveSessionViewModel {
     // MARK: - Private
 
     private func handleTranscriptionSegment(_ segment: TranscriptionSegment) {
-        // Build the full seat transcript: prior session text + new ASR output.
-        let candidate: String
-        if priorSeatTranscript.isEmpty {
-            candidate = segment.text
-        } else {
-            candidate = "\(priorSeatTranscript) \(segment.text)"
-        }
-
-        // Never let the transcript go backward. If ASR fires isFinal with an empty or
-        // shorter result (known SFSpeechRecognizer edge case), preserve what we had.
-        let existing = seatTranscripts[activeSeatNumber] ?? ""
-        let fullText = candidate.count >= existing.count ? candidate : existing
+        // The transcription service is the single source of truth: `segment.text`
+        // already contains the seat's prior transcript (the seed) plus new speech,
+        // and is guaranteed never to regress. Display it directly — no second
+        // accumulation layer to drift out of sync.
+        let fullText = segment.text
 
         seatTranscripts[activeSeatNumber] = fullText
         draft.seatTranscripts[activeSeatNumber] = fullText

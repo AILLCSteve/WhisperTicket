@@ -1,33 +1,56 @@
 import Speech
 import AVFoundation
 import Combine
+import os
 
+/// On-device streaming transcription with a single source of truth for the
+/// full session transcript.
+///
+/// ## Why this design
+/// `SFSpeechRecognizer` restarts recognition tasks mid-session (after a pause it
+/// fires `isFinal`; on silence/timeout it errors). Naively, each restarted task
+/// only transcribes audio recorded *after* the restart, so the text spoken before
+/// the pause disappears — the classic "transcript reset" bug.
+///
+/// This service guarantees the emitted transcript **never goes backward**:
+///
+/// - `committedText` holds everything confirmed by prior tasks (seeded with any
+///   transcript that already existed for the seat). It only ever grows.
+/// - `taskBest` is the longest partial seen in the *current* task (a per-task
+///   high-water mark), so an isFinal that arrives empty or shorter than an earlier
+///   partial can never erase text that was already displayed.
+/// - The emitted transcript is always `committedText (+ " " + taskBest)`.
+///
+/// Because the service owns the entire transcript, the ViewModel simply displays
+/// what it emits — there is no second accumulation layer to drift out of sync.
 final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private let transcriptionSubject = PassthroughSubject<TranscriptionSegment, Never>()
+    private let log = Logger(subsystem: "com.whisperticket.app", category: "ASR")
 
-    // MARK: - Accumulation state
+    // MARK: - Accumulation state (single source of truth)
 
-    /// Text confirmed by all completed recognition tasks so far in this session.
-    private var accumulatedBase = ""
-    /// Last non-empty full transcript seen in the current task — guards against
-    /// isFinal firing with an empty/degraded result after valid text was shown.
-    private var lastNonEmptyText = ""
+    /// Everything confirmed by completed recognition tasks in this session,
+    /// including the seed transcript passed at start. Only ever grows.
+    private var committedText = ""
+    /// Longest partial transcript seen in the *current* task — a per-task
+    /// high-water mark. Guards against isFinal firing empty/degraded after valid
+    /// text was already shown. Reset to "" when a new task begins.
+    private var taskBest = ""
     private var isSessionActive = false
 
     // MARK: - Audio relay
     //
     // A single subscription to the upstream audio publisher persists for the
     // entire recording session. Each buffer is delivered to whatever
-    // `recognitionRequest` is current at delivery time. This means recognition
-    // task restarts (after isFinal or error) never create an audio gap — the
-    // PassthroughSubject always has an active subscriber so no frames are lost.
+    // `recognitionRequest` is current at delivery time, so task restarts never
+    // require re-subscribing to audio.
     private var audioCancellable: AnyCancellable?
 
-    // Guards against rapid-restart loops when a new task fires isFinal
-    // immediately because it got silence at the start (e.g., during engine warm-up).
+    // Timestamp of the last task start, used to back off if a task fires isFinal
+    // almost immediately (silence at the boundary) to avoid a tight restart loop.
     private var lastRestartDate: Date = .distantPast
 
     static func requestPermission(completion: @escaping (Bool) -> Void) {
@@ -42,14 +65,15 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         transcriptionSubject.eraseToAnyPublisher()
     }
 
-    func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>) throws {
-        accumulatedBase = ""
-        lastNonEmptyText = ""
+    func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>, seed: String) throws {
+        committedText = seed
+        taskBest = ""
         isSessionActive = true
+        log.debug("startTranscribing seed=\(seed.count, privacy: .public) chars")
 
         // Subscribe ONCE. The closure always reads self?.recognitionRequest so
-        // hot-swapping requests (on task restart) redirects audio without cancelling
-        // the upstream subscription — no frames dropped at transition boundaries.
+        // hot-swapping requests (on task restart) redirects audio without
+        // cancelling the upstream subscription — no re-subscription churn.
         audioCancellable = audioPublisher.sink { [weak self] buffer in
             self?.recognitionRequest?.append(buffer)
         }
@@ -67,70 +91,65 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = true
 
-        // Hot-swap: point the persistent audio relay at the new request BEFORE
-        // cancelling the old task, so audio is continuous across the boundary.
         self.recognitionRequest = request
         lastRestartDate = Date()
+        taskBest = ""
 
-        // Snapshot base at task-start time — immutable for this closure's lifetime.
-        let base = accumulatedBase
+        // Snapshot the committed prefix for this task's lifetime.
+        let base = committedText
+        log.debug("beginRecognitionTask base=\(base.count, privacy: .public) chars")
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self, self.isSessionActive else { return }
 
             if let result {
-                let currentText = result.bestTranscription.formattedString
-                let computed: String
-                if base.isEmpty {
-                    computed = currentText
-                } else if currentText.isEmpty {
-                    computed = base
-                } else {
-                    computed = "\(base) \(currentText)"
+                let current = result.bestTranscription.formattedString
+                // Per-task high-water mark: never shrink within a task.
+                if current.count > self.taskBest.count {
+                    self.taskBest = current
                 }
+                let full = Self.join(base, self.taskBest)
 
-                // Never regress: if isFinal fires with empty/degraded text keep the
-                // last valid transcript already shown in the UI.
-                let textToSend: String
-                if computed.isEmpty {
-                    textToSend = self.lastNonEmptyText
-                } else {
-                    textToSend = computed
-                    self.lastNonEmptyText = computed
-                }
-
-                self.transcriptionSubject.send(TranscriptionSegment(text: textToSend, isFinal: result.isFinal))
+                self.transcriptionSubject.send(TranscriptionSegment(text: full, isFinal: result.isFinal))
 
                 if result.isFinal {
-                    let preserved = self.lastNonEmptyText
-                    // Only advance the accumulated base when we actually have text.
-                    // An empty preserved would erase text from previous tasks.
-                    if !preserved.isEmpty {
-                        self.accumulatedBase = preserved
-                    }
-                    self.lastNonEmptyText = ""
-                    self.recognitionRequest = nil
-                    self.recognitionTask = nil
-                    self.scheduleRestart()
+                    self.commitAndRestart(base: base)
                     return
                 }
             }
 
-            if let _ = error {
-                if !self.lastNonEmptyText.isEmpty {
-                    self.accumulatedBase = self.lastNonEmptyText
-                }
-                self.lastNonEmptyText = ""
-                self.recognitionRequest = nil
-                self.recognitionTask = nil
-                self.scheduleRestart()
+            if error != nil {
+                self.log.debug("recognition error — restarting; committed=\(self.committedText.count, privacy: .public)")
+                self.commitAndRestart(base: base)
             }
         }
     }
 
+    /// Fold the current task's best text into the permanent committed prefix and
+    /// schedule the next task. `committedText` only ever grows, so no prior text
+    /// can be lost across the restart boundary.
+    private func commitAndRestart(base: String) {
+        if !taskBest.isEmpty {
+            committedText = Self.join(base, taskBest)
+        }
+        taskBest = ""
+        recognitionRequest = nil
+        recognitionTask = nil
+        scheduleRestart()
+    }
+
+    /// Join a committed prefix and a live suffix with a single space, tolerating
+    /// either side being empty.
+    private static func join(_ a: String, _ b: String) -> String {
+        if a.isEmpty { return b }
+        if b.isEmpty { return a }
+        return "\(a) \(b)"
+    }
+
     // Schedules a restart with a back-off when the task fired isFinal too quickly
-    // (< 200 ms after starting), which indicates the recognizer got silence at
-    // the boundary and would loop immediately without a delay.
+    // (< 200 ms after starting), which indicates the recognizer got silence at the
+    // boundary and would loop immediately without a delay. Because isFinal fires on
+    // silence, the brief gap loses no real speech.
     private func scheduleRestart() {
         guard isSessionActive else { return }
         let elapsed = Date().timeIntervalSince(lastRestartDate)
@@ -157,8 +176,8 @@ final class SFSpeechTranscriptionService: TranscriptionServiceProtocol {
         recognitionTask?.cancel()
         recognitionRequest = nil
         recognitionTask = nil
-        accumulatedBase = ""
-        lastNonEmptyText = ""
+        committedText = ""
+        taskBest = ""
     }
 }
 

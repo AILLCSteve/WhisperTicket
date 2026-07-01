@@ -17,7 +17,11 @@ protocol AudioCaptureServiceProtocol: AnyObject {
 
 protocol TranscriptionServiceProtocol: AnyObject {
     func transcriptionPublisher() -> AnyPublisher<TranscriptionSegment, Never>
-    func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>) throws
+    /// Starts streaming transcription. `seed` is any transcript that already exists
+    /// for the target seat; the service treats it as the immutable prefix so the
+    /// emitted transcript is the single source of truth (prior text + new speech)
+    /// and never regresses. Pass "" for a fresh seat.
+    func startTranscribing(audioPublisher: AnyPublisher<AVAudioPCMBuffer, Never>, seed: String) throws
     /// Immediately seals the session (isSessionActive = false, endAudio) without
     /// cancelling the existing recognition task. Allows the final drain to deliver
     /// its last segment before stopTranscribing() cleans up. Call in stopRecording().
