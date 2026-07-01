@@ -101,6 +101,7 @@ struct LiveSessionView: View {
                     .alert("Add Item", isPresented: $showAddItemAlert) {
                         TextField("Item name", text: $manualItemName)
                         Button("Add") {
+                            Haptics.selection()
                             vm.addManualItem(name: manualItemName)
                             manualItemName = ""
                         }
@@ -300,8 +301,13 @@ struct LiveSessionView: View {
                 .disabled(vm.draft.items.isEmpty && vm.seatTranscripts.isEmpty)
 
                 LiveMicButton(isRecording: vm.isRecording, isDisabled: false) {
-                    if vm.isRecording { vm.stopRecording() }
-                    else { vm.startRecording() }
+                    if vm.isRecording {
+                        Haptics.recordStop()
+                        vm.stopRecording()
+                    } else {
+                        Haptics.recordStart()
+                        vm.startRecording()
+                    }
                 }
                 .frame(maxWidth: .infinity)
 
@@ -348,8 +354,10 @@ struct LiveSessionView: View {
     private func confirmAndNavigate(vm: LiveSessionViewModel) async {
         do {
             let ticket = try await services.repository.createTicket(from: vm.draft, serverId: "local_server")
+            Haptics.selection()
             navigateToEditor = ticket
         } catch {
+            Haptics.error()
             createTicketError = "Could not create ticket: \(error.localizedDescription)"
         }
     }
@@ -360,8 +368,10 @@ struct LiveSessionView: View {
             ticket.sentToKitchenAt = Date()
             ticket.status = TicketStatus.sent.rawValue
             try await services.repository.save(ticket)
+            Haptics.success()
             navigateToEditor = ticket
         } catch {
+            Haptics.error()
             createTicketError = "Could not send ticket: \(error.localizedDescription)"
         }
     }
@@ -703,6 +713,7 @@ struct ItemEditorSheet: View {
                             .map { $0.trimmingCharacters(in: .whitespaces) }
                             .filter { !$0.isEmpty }
                         updated.notes = notesText.trimmingCharacters(in: .whitespaces)
+                        Haptics.selection()
                         onSave(updated)
                         dismiss()
                     }
