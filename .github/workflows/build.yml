@@ -194,6 +194,11 @@ jobs:
       # ── Set compliance + distribute to internal group via ASC API ───────────
       - name: Set compliance & distribute to internal testers
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        # Post-upload bookkeeping only. The IPA is already on TestFlight and
+        # compliance is set via Info.plist (ITSAppUsesNonExemptEncryption=false),
+        # so a transient ASC API hiccup (e.g. 403 while a freshly-accepted
+        # agreement propagates) must never fail an otherwise-successful build.
+        continue-on-error: true
         env:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -212,11 +217,27 @@ jobs:
           # fields[apps]: 'id' is the JSON:API resource identifier — always
           # present, never a valid sparse fieldset attribute (ASC returns 400
           # if you request it). Request only 'name'; id comes free.
-          APP_RESP=$(curl -sSf \
+          # Use --http1.1 + -o/-w (no -f): HTTP/2 + -f masks 4xx as exit 56 and
+          # kills the step. Capture status so a 403 (agreement still propagating)
+          # degrades gracefully instead of reddening a successful upload.
+          APP_HTTP=$(curl -s --http1.1 \
             -H "Authorization: Bearer $JWT" \
-            "https://api.appstoreconnect.apple.com/v1/apps?filter%5BbundleId%5D=com.whisperticket.app&fields%5Bapps%5D=name")
-          APP_ID=$(echo "$APP_RESP" | python3 -c \
-            "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
+            -o /tmp/app_resp.json \
+            -w "%{http_code}" \
+            "https://api.appstoreconnect.apple.com/v1/apps?filter%5BbundleId%5D=com.whisperticket.app&fields%5Bapps%5D=name" \
+            || echo "000")
+          echo "=== apps lookup HTTP $APP_HTTP ==="
+          cat /tmp/app_resp.json 2>/dev/null || echo "(no response body)"
+          if [ "$APP_HTTP" != "200" ]; then
+            echo "⚠️ apps API returned HTTP $APP_HTTP — build is already uploaded to TestFlight and compliance is set via Info.plist; skipping API distribute."
+            exit 0
+          fi
+          APP_ID=$(python3 -c \
+            "import sys,json; d=json.load(open('/tmp/app_resp.json')); print(d['data'][0]['id'] if d['data'] else '')" 2>/dev/null || echo "")
+          if [ -z "$APP_ID" ]; then
+            echo "⚠️ No app found for bundle id com.whisperticket.app — skipping API distribute."
+            exit 0
+          fi
           echo "App ID: $APP_ID"
 
           # ── Wait for build to appear (up to 3 min, checks every 20s) ───
