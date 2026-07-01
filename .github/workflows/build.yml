@@ -240,9 +240,15 @@ jobs:
           fi
           echo "App ID: $APP_ID"
 
-          # ── Wait for build to appear (up to 3 min, checks every 20s) ───
+          # ── Diagnostics: dump current beta groups + recent build states so we
+          #    can see (in the log) whether an internal group/tester exists and
+          #    whether uploaded builds are Processing/Valid/Invalid. Non-fatal.
+          python3 scripts/asc_report.py "$JWT" "$APP_ID" || true
+
+          # ── Wait for build to appear (up to ~8 min, checks every 30s).
+          #    Apple processing is async and often exceeds a few minutes.
           BUILD_ID=""
-          for i in $(seq 1 9); do
+          for i in $(seq 1 16); do
             BUILD_RESP=$(curl -sSf \
               -H "Authorization: Bearer $JWT" \
               "https://api.appstoreconnect.apple.com/v1/builds?filter%5Bapp%5D=$APP_ID&filter%5Bversion%5D=$BUILD_NUMBER&sort=-uploadedDate&limit=1&fields%5Bbuilds%5D=processingState,usesNonExemptEncryption" \
@@ -253,8 +259,8 @@ jobs:
               echo "Build found: $BUILD_ID"
               break
             fi
-            echo "Waiting for build $BUILD_NUMBER to appear in ASC (attempt $i/9)..."
-            sleep 20
+            echo "Waiting for build $BUILD_NUMBER to appear in ASC (attempt $i/16)..."
+            sleep 30
           done
 
           if [ -z "$BUILD_ID" ]; then
@@ -272,13 +278,15 @@ jobs:
             "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('attributes',{}).get('usesNonExemptEncryption','(no response)'))" 2>/dev/null || echo 'done')"
 
           # ── Find internal beta groups ────────────────────────────────────
-          # Use --http1.1 + -o/-w (no -f) to capture the real response body and
-          # HTTP status. HTTP/2 + -f masks 4xx errors as exit 56 (curl bug #13411).
+          # `filter[isInternalGroup]` is ILLEGAL on this endpoint (ASC returns
+          # PARAMETER_ERROR.ILLEGAL / 400). Fetch ALL groups and read the
+          # isInternalGroup ATTRIBUTE, filtering client-side.
+          # Use --http1.1 + -o/-w (no -f): HTTP/2 + -f masks 4xx as exit 56.
           GROUPS_HTTP=$(curl -s --http1.1 \
             -H "Authorization: Bearer $JWT" \
             -o /tmp/betagroups_resp.json \
             -w "%{http_code}" \
-            "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/betaGroups?filter%5BisInternalGroup%5D=true&fields%5BbetaGroups%5D=name" \
+            "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/betaGroups?fields%5BbetaGroups%5D=name,isInternalGroup&limit=200" \
             || echo "000")
           echo "=== betaGroups HTTP $GROUPS_HTTP ==="
           cat /tmp/betagroups_resp.json 2>/dev/null || echo "(no response body)"
@@ -289,7 +297,7 @@ jobs:
           fi
 
           GROUPS=$(python3 -c \
-            "import sys,json; f=open('/tmp/betagroups_resp.json'); d=json.load(f); [print(g['id']+'|'+g['attributes']['name']) for g in d['data']]" 2>/dev/null || echo "")
+            "import sys,json; d=json.load(open('/tmp/betagroups_resp.json')); [print(g['id']+'|'+g['attributes']['name']) for g in d['data'] if g['attributes'].get('isInternalGroup')]" 2>/dev/null || echo "")
 
           if [ -z "$GROUPS" ]; then
             echo "⚠️ No internal beta groups found — add testers manually in ASC once, then enable Automatic Distribution."
