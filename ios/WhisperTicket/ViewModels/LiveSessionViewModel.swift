@@ -187,6 +187,82 @@ final class LiveSessionViewModel {
         refreshUpsells()
     }
 
+    // MARK: - Menu-picker add / replace / disambiguation
+
+    /// Items the parser flagged as ambiguous that still need the server to confirm
+    /// which menu item was meant. Table-wide so a prompt is never hidden by a seat
+    /// switch.
+    var itemsNeedingChoice: [DraftItem] {
+        draft.items.filter { $0.needsDisambiguation }
+    }
+
+    /// Add a chosen menu item to the active seat (from the menu picker / footer +).
+    func addMenuItem(_ menuItem: MenuItem) {
+        let note = menuItem.kitchenNoteTemplate ?? ""
+        var item = DraftItem(
+            menuItemId: menuItem.id,
+            name: menuItem.name,
+            quantity: 1,
+            modifierNames: [], negations: [],
+            course: Self.course(for: menuItem),
+            seatNumber: activeSeatNumber,
+            notes: note,
+            confidence: 1.0,
+            hasAllergyFlag: false,
+            kitchenNoteTemplate: note.isEmpty ? nil : note
+        )
+        item.seatNumber = activeSeatNumber
+        draft.addItem(item)
+        refreshUpsells()
+    }
+
+    /// Replace an existing draft item with a chosen menu item, preserving quantity,
+    /// seat and notes. Clears any ambiguity flag.
+    func replaceItem(_ old: DraftItem, withMenuItem menuItem: MenuItem) {
+        guard let idx = draft.items.firstIndex(where: { $0.id == old.id }) else { return }
+        var updated = old
+        updated.menuItemId = menuItem.id
+        updated.name = menuItem.name
+        updated.course = Self.course(for: menuItem)
+        updated.confidence = 1.0
+        updated.alternativeMenuItemIds = []
+        if updated.notes.isEmpty, let note = menuItem.kitchenNoteTemplate { updated.notes = note }
+        draft.items[idx] = updated
+        refreshUpsells()
+    }
+
+    /// Replace an existing draft item with a free-typed custom name.
+    func replaceItem(_ old: DraftItem, withCustomName name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, let idx = draft.items.firstIndex(where: { $0.id == old.id }) else { return }
+        var updated = old
+        updated.menuItemId = "manual_\(UUID().uuidString)"
+        updated.name = trimmed
+        updated.confidence = 1.0
+        updated.alternativeMenuItemIds = []
+        draft.items[idx] = updated
+        refreshUpsells()
+    }
+
+    /// Confirm which menu item an ambiguous parse actually meant.
+    func resolveDisambiguation(_ item: DraftItem, chosen menuItem: MenuItem) {
+        replaceItem(item, withMenuItem: menuItem)
+    }
+
+    /// Dismiss the ambiguity prompt, keeping the parser's best guess as-is.
+    func keepGuess(_ item: DraftItem) {
+        guard let idx = draft.items.firstIndex(where: { $0.id == item.id }) else { return }
+        draft.items[idx].alternativeMenuItemIds = []
+    }
+
+    private static func course(for item: MenuItem) -> CourseFlag {
+        if item.tags.contains("beverage") || item.tags.contains("drink") { return .beverage }
+        if item.tags.contains("dessert") { return .dessert }
+        if item.tags.contains("appetizer") { return .appetizer }
+        if item.tags.contains("side") { return .side }
+        return .entree
+    }
+
     func clearSeat(_ seatNumber: Int) {
         draft.items.removeAll { $0.seatNumber == seatNumber }
         seatTranscripts.removeValue(forKey: seatNumber)
@@ -409,10 +485,17 @@ enum TranscriptCleaner {
 
     static func clean(_ transcript: String) -> String {
         var text = transcript
-        // Replace each filler phrase (case-insensitive). Longest first ensures
-        // "i would like to have" is matched before "i would like".
+        // Replace each filler phrase on WORD BOUNDARIES (case-insensitive). Longest
+        // first ensures "i would like to have" is matched before "i would like".
+        // Word boundaries are critical: a plain substring replace of "er"/"so"/"just"
+        // silently mangles real words ("better" → "bett", "soup" → "up"). \b fixes it.
         for phrase in fillerPhrases {
-            text = text.replacingOccurrences(of: phrase, with: " ", options: .caseInsensitive)
+            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: phrase) + "\\b"
+            text = text.replacingOccurrences(
+                of: pattern,
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
         }
         // Collapse whitespace and trim
         return text

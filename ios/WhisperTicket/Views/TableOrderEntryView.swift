@@ -22,6 +22,21 @@ struct TableOrderEntryView: View {
     @State private var manualItemText = ""
     @State private var showAddSeat = false
     @State private var newSeatLabel = ""
+    @State private var pickerSheet: PickerSheet?
+
+    /// The three menu-picker flows, all rendered by the shared `MenuPickerSheet`.
+    private enum PickerSheet: Identifiable {
+        case addToActiveSeat
+        case replace(DraftItem)
+        case disambiguate(DraftItem)
+        var id: String {
+            switch self {
+            case .addToActiveSeat: return "add"
+            case .replace(let item): return "replace_\(item.id)"
+            case .disambiguate(let item): return "disambig_\(item.id)"
+            }
+        }
+    }
 
     init(table: FloorTable) {
         self.table = table
@@ -72,6 +87,9 @@ struct TableOrderEntryView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        if !vm.itemsNeedingChoice.isEmpty {
+                            disambiguationSection(vm: vm)
+                        }
                         if !vm.itemsBySeat().isEmpty {
                             orderSummarySection(vm: vm)
                         }
@@ -87,6 +105,9 @@ struct TableOrderEntryView: View {
             }
 
             bottomBar(vm: vm)
+                .sheet(item: $pickerSheet) { sheet in
+                    pickerContent(sheet, vm: vm)
+                }
         }
         .sheet(isPresented: Binding(get: { vm.showRepeatBack }, set: { vm.showRepeatBack = $0 })) {
             let seatLabelMap = Dictionary(
@@ -282,19 +303,26 @@ struct TableOrderEntryView: View {
                     label: label,
                     seatNumber: group.seatNumber,
                     items: group.items,
-                    isActive: isActive
-                ) {
-                    // Switch to this seat
-                    activeSeatIndex = max(0, group.seatNumber - 1)
-                    vm.activeSeatNumber = group.seatNumber
-                    vm.activeSeatLabel = seatConfigs[max(0, group.seatNumber - 1)].label
-                } onClear: {
-                    activeSeatIndex = max(0, group.seatNumber - 1)
-                    vm.activeSeatNumber = group.seatNumber
-                    vm.clearSeat(group.seatNumber)
-                } onRemoveItem: { item in
-                    vm.removeItem(item)
-                }
+                    isActive: isActive,
+                    onAddMore: {
+                        // Focus this seat, then open the full-menu picker.
+                        selectSeat(group.seatNumber, vm: vm)
+                        Haptics.selection()
+                        pickerSheet = .addToActiveSeat
+                    },
+                    onClear: {
+                        selectSeat(group.seatNumber, vm: vm)
+                        vm.clearSeat(group.seatNumber)
+                    },
+                    onRemoveItem: { item in
+                        vm.removeItem(item)
+                    },
+                    onReplaceItem: { item in
+                        selectSeat(group.seatNumber, vm: vm)
+                        Haptics.selection()
+                        pickerSheet = .replace(item)
+                    }
+                )
             }
         }
     }
@@ -389,6 +417,85 @@ struct TableOrderEntryView: View {
         }
     }
 
+    // MARK: - Disambiguation
+
+    @ViewBuilder
+    private func disambiguationSection(vm: LiveSessionViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ChromeSectionHeader(title: "Confirm item", systemImage: "questionmark.circle.fill")
+                .padding(.bottom, 2)
+
+            ForEach(vm.itemsNeedingChoice) { item in
+                let candidates = item.alternativeMenuItemIds.compactMap { services.menuStore.item(byId: $0) }
+                DisambiguationCard(
+                    guessName: item.name,
+                    candidates: candidates,
+                    onChoose: { chosen in
+                        Haptics.selection()
+                        vm.resolveDisambiguation(item, chosen: chosen)
+                    },
+                    onBrowse: {
+                        Haptics.selection()
+                        pickerSheet = .disambiguate(item)
+                    },
+                    onKeep: {
+                        vm.keepGuess(item)
+                    }
+                )
+            }
+        }
+    }
+
+    // MARK: - Menu Picker
+
+    @ViewBuilder
+    private func pickerContent(_ sheet: PickerSheet, vm: LiveSessionViewModel) -> some View {
+        if let menu = services.menuStore.menu {
+            switch sheet {
+            case .addToActiveSeat:
+                MenuPickerSheet(
+                    title: "Add to \(activeSeat.label)",
+                    menu: menu,
+                    onSelect: { item in Haptics.selection(); vm.addMenuItem(item) },
+                    onCustom: { name in Haptics.selection(); vm.addManualItem(name: name) }
+                )
+            case .replace(let item):
+                let related = services.menuStore.findBestMatches(text: item.name, maxResults: 6).map { $0.item }
+                MenuPickerSheet(
+                    title: "Replace \(item.name)",
+                    menu: menu,
+                    suggestions: related,
+                    suggestionsTitle: "Related items",
+                    onSelect: { chosen in Haptics.selection(); vm.replaceItem(item, withMenuItem: chosen) },
+                    onCustom: { name in Haptics.selection(); vm.replaceItem(item, withCustomName: name) }
+                )
+            case .disambiguate(let item):
+                let candidates = item.alternativeMenuItemIds.compactMap { services.menuStore.item(byId: $0) }
+                MenuPickerSheet(
+                    title: "Which item?",
+                    menu: menu,
+                    suggestions: candidates,
+                    suggestionsTitle: "Did you mean…",
+                    onSelect: { chosen in Haptics.selection(); vm.resolveDisambiguation(item, chosen: chosen) },
+                    onCustom: { name in Haptics.selection(); vm.replaceItem(item, withCustomName: name) }
+                )
+            }
+        } else {
+            ZStack {
+                Color.chromeBackground.ignoresSafeArea()
+                Text("Menu is still loading…")
+                    .foregroundStyle(Color.chromeSilverLow)
+            }
+        }
+    }
+
+    private func selectSeat(_ seatNumber: Int, vm: LiveSessionViewModel) {
+        let idx = max(0, min(seatNumber - 1, seatConfigs.count - 1))
+        activeSeatIndex = idx
+        vm.activeSeatNumber = seatNumber
+        vm.activeSeatLabel = seatConfigs[idx].label
+    }
+
     // MARK: - Bottom Bar
 
     @ViewBuilder
@@ -408,6 +515,22 @@ struct TableOrderEntryView: View {
 
             // Main controls
             HStack(spacing: 0) {
+                // Browse menu / add item
+                Button {
+                    Haptics.selection()
+                    pickerSheet = .addToActiveSeat
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20, weight: .medium))
+                        Text("Add")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.chromePrimary)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+
                 // Manual entry
                 Button {
                     manualItemText = ""
@@ -528,9 +651,10 @@ private struct SeatOrderCard: View {
     let seatNumber: Int
     let items: [DraftItem]
     let isActive: Bool
-    let onSwitchTo: () -> Void
+    let onAddMore: () -> Void
     let onClear: () -> Void
     let onRemoveItem: (DraftItem) -> Void
+    let onReplaceItem: (DraftItem) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -542,17 +666,25 @@ private struct SeatOrderCard: View {
                     .font(.subheadline.bold())
                     .foregroundStyle(isActive ? .white : Color.chromeSilverHigh)
                 Spacer()
-                Button(action: onSwitchTo) {
-                    Text("Add More")
-                        .font(.caption2.bold())
-                        .foregroundStyle(Color.chromePrimary)
+                Button(action: onAddMore) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 14, weight: .bold))
+                        Text("Add More")
+                            .font(.caption.bold())
+                    }
+                    .foregroundStyle(Color.chromePrimary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.chromePrimary.opacity(0.14))
+                    .overlay(Capsule().strokeBorder(Color.chromePrimary.opacity(0.4), lineWidth: 1))
+                    .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                Text("·").font(.caption2).foregroundStyle(Color.chromeSilverLow.opacity(0.5))
                 Button(role: .destructive, action: onClear) {
                     Text("Clear")
-                        .font(.caption2.bold())
-                        .foregroundStyle(Color.chromeRed.opacity(0.7))
+                        .font(.caption.bold())
+                        .foregroundStyle(Color.chromeRed.opacity(0.75))
                 }
                 .buttonStyle(.plain)
             }
@@ -568,7 +700,7 @@ private struct SeatOrderCard: View {
                         HStack(spacing: 6) {
                             Text("\(item.quantity)× \(item.name)")
                                 .font(.callout.bold())
-                                .foregroundStyle(.white)
+                                .foregroundStyle(item.isOffMenu ? Color.chromeAmber : .white)
                             ConfidenceDot(confidence: item.confidence)
                             if item.hasAllergyFlag { ChromeAllergyCapsule() }
                         }
@@ -584,6 +716,12 @@ private struct SeatOrderCard: View {
                         }
                     }
                     Spacer()
+                    Button { onReplaceItem(item) } label: {
+                        Image(systemName: "arrow.2.squarepath")
+                            .foregroundStyle(Color.chromePrimary.opacity(0.8))
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
                     Button { onRemoveItem(item) } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(Color.chromeSilverLow.opacity(0.5))
@@ -606,6 +744,84 @@ private struct SeatOrderCard: View {
                     lineWidth: 1
                 )
         )
+    }
+}
+
+// MARK: - Disambiguation Card
+
+/// Shown when the parser matched a spoken phrase to more than one plausible menu
+/// item. Presents the competing options as one-tap chips, plus escape hatches to
+/// browse the whole menu / type a custom item, or keep the parser's best guess.
+private struct DisambiguationCard: View {
+    let guessName: String
+    let candidates: [MenuItem]
+    let onChoose: (MenuItem) -> Void
+    let onBrowse: () -> Void
+    let onKeep: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Heard something that could be a few things — tap the right one:")
+                .font(.caption)
+                .foregroundStyle(Color.chromeSilverLow)
+
+            FlexibleChips(candidates: candidates, onChoose: onChoose)
+
+            HStack(spacing: 10) {
+                Button(action: onBrowse) {
+                    Label("Browse menu", systemImage: "list.bullet")
+                        .font(.caption.bold())
+                        .foregroundStyle(Color.chromePrimary)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Button(action: onKeep) {
+                    Text("Keep \"\(guessName)\"")
+                        .font(.caption)
+                        .foregroundStyle(Color.chromeSilverLow)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .chromeCard(cornerRadius: 14, glowColor: .chromeAmber, glowRadius: 5)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.chromeAmber.opacity(0.35), lineWidth: 1)
+        )
+    }
+}
+
+/// Simple wrapping row of candidate chips.
+private struct FlexibleChips: View {
+    let candidates: [MenuItem]
+    let onChoose: (MenuItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(candidates) { item in
+                Button { onChoose(item) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 13, weight: .bold))
+                        Text(item.name)
+                            .font(.caption.bold())
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.chromePrimary.opacity(0.16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(Color.chromePrimary.opacity(0.45), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 

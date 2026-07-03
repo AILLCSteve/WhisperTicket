@@ -50,6 +50,15 @@ struct DraftItem: Identifiable {
     var hasAllergyFlag: Bool
     var kitchenNoteTemplate: String?
 
+    /// When the parser matched this spoken phrase to more than one plausible menu
+    /// item (e.g. "ham" → "Ham & Cheese Sandwich" vs "Turkey & Ham Sandwich"), the
+    /// tentative best guess is used as `menuItemId`/`name` and the competing
+    /// candidates (including the guess) are listed here so the UI can ask the user
+    /// to confirm. Empty = unambiguous, no confirmation needed.
+    var alternativeMenuItemIds: [String] = []
+
+    var needsDisambiguation: Bool { !alternativeMenuItemIds.isEmpty }
+
     /// True for items that did not match any known menu entry —
     /// off-menu spoken requests, transcript fallbacks, and manually typed items.
     var isOffMenu: Bool {

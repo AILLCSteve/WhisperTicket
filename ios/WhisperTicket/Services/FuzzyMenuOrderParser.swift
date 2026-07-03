@@ -21,10 +21,32 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
         "med well": "Medium Well", "well done": "Well Done", "well": "Well Done"
     ]
 
-    private let numberWords: [String: Int] = [
-        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10
+    // Units + teens (each maps to its own value), tens (multiples of 10), and
+    // words like "dozen"/"couple". Used by the compound quantity parser so
+    // "forty five coffees" → 45, not 1. Kept separate from the segment normalizer
+    // so we can accumulate compounds ("forty" + "five") instead of substituting
+    // each word independently.
+    private let numberUnits: [String: Int] = [
+        "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9,
+        "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+        "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+        "dozen": 12, "couple": 2, "pair": 2
     ]
+
+    private let numberTens: [String: Int] = [
+        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+        "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90
+    ]
+
+    // Short grammatical words that carry no matching signal. Removed from the
+    // query token set so item selection keys on real food words only.
+    private let stopWords = Set([
+        "and", "the", "with", "for", "a", "an", "of", "or", "some", "please",
+        "get", "have", "want", "would", "like", "can", "could", "i", "we",
+        "me", "us", "my", "our", "to", "on", "in", "add", "also", "plus",
+        "then", "just", "that", "this", "it", "is", "are", "be", "no"
+    ])
 
     private let negationPrefixes = ["no", "without", "hold", "remove", "skip"]
 
@@ -79,10 +101,21 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
             let qty = extractQuantity(from: sentence)
             let course = explicitCourse ?? .entree
 
-            if let (matchedItem, score) = findBestItem(in: sentence, from: allItems) {
+            let candidates = rankItems(in: sentence, from: allItems)
+            if let top = candidates.first {
+                let matchedItem = top.item
                 let mods = extractModifiers(from: sentence, item: matchedItem)
                 let kitchenNote = matchedItem.kitchenNoteTemplate ?? ""
                 let inferredCourse = explicitCourse ?? inferCourse(from: matchedItem)
+
+                // Ambiguous when a runner-up scores nearly as high — i.e. the speech
+                // didn't contain enough clues to separate them. Surface the top few
+                // (including the guess) for one-tap confirmation instead of silently
+                // committing a coin-flip.
+                let contenders = candidates.dropFirst().filter { top.score - $0.score <= 0.12 }
+                let alternatives: [String] = contenders.isEmpty
+                    ? []
+                    : Array(([matchedItem.id] + contenders.map { $0.item.id }).prefix(4))
 
                 let draftItem = DraftItem(
                     menuItemId: matchedItem.id,
@@ -93,9 +126,10 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
                     course: inferredCourse,
                     seatNumber: currentSeat,
                     notes: kitchenNote,
-                    confidence: score,
+                    confidence: alternatives.isEmpty ? top.score : min(top.score, 0.5),
                     hasAllergyFlag: hasAllergy,
-                    kitchenNoteTemplate: kitchenNote.isEmpty ? nil : kitchenNote
+                    kitchenNoteTemplate: kitchenNote.isEmpty ? nil : kitchenNote,
+                    alternativeMenuItemIds: alternatives
                 )
                 draft.addItem(draftItem)
             } else {
@@ -157,7 +191,11 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
         for filler in fillerWords {
             result = result.replacingOccurrences(of: "\\b\(filler)\\b", with: "", options: .regularExpression)
         }
-        for (word, digit) in numberWords {
+        // Convert only standalone units/teens to digits (one→1 … nineteen→19) so
+        // "seat three" and simple counts work. Tens words ("forty") are LEFT as
+        // words and combined by extractQuantity so compounds ("forty five" → 45)
+        // aren't broken into "40 5".
+        for (word, digit) in numberUnits {
             result = result.replacingOccurrences(of: "\\b\(word)\\b", with: "\(digit)", options: .regularExpression)
         }
         return result.trimmingCharacters(in: .whitespaces)
@@ -193,17 +231,39 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
         return nil
     }
 
-    private func findBestItem(in segment: String, from items: [MenuItem]) -> (MenuItem, Double)? {
-        var best: (MenuItem, Double)? = nil
-        let queryTokens = segment.split(separator: " ").map(String.init)
+    struct ItemMatch {
+        let item: MenuItem
+        let score: Double        // combined query- + item-coverage
+        let queryCoverage: Double
+    }
+
+    /// Ranks menu items against a spoken segment. Score rewards BOTH how much of
+    /// the query an item explains (queryCoverage) and how completely the item's own
+    /// name is present (itemCoverage) — so when the speaker adds clues ("ham and
+    /// cheese"), the item whose full name is matched wins, but a bare "ham" leaves
+    /// two sandwiches tied (→ disambiguation) instead of arbitrarily picking one.
+    private func rankItems(in segment: String, from items: [MenuItem]) -> [ItemMatch] {
+        let qTokens = contentTokens(segment)
+        let qSet = Set(qTokens)
+        guard !qSet.isEmpty else { return [] }
+
+        var matches: [ItemMatch] = []
         for item in items {
-            let itemTokens = normalizeText(item.name).split(separator: " ").map(String.init)
-            let score = tokenOverlapScore(query: queryTokens, candidate: itemTokens)
-            if score > 0.4 {
-                if best == nil || score > best!.1 { best = (item, score) }
-            }
+            let cTokens = contentTokens(normalizeText(item.name))
+            let cSet = Set(cTokens)
+            guard !cSet.isEmpty else { continue }
+            let overlap = qSet.intersection(cSet).count
+            guard overlap > 0 else { continue }
+            let queryCoverage = Double(overlap) / Double(qSet.count)
+            let itemCoverage = Double(overlap) / Double(cSet.count)
+            // Require at least half the item's name OR a strong slice of the query
+            // to be present — blocks "chicken" from matching "Chicken Caesar Wrap"
+            // on one shared token while allowing intended single-word items.
+            guard itemCoverage >= 0.5 || queryCoverage >= 0.5 else { continue }
+            let score = 0.6 * queryCoverage + 0.4 * itemCoverage
+            matches.append(ItemMatch(item: item, score: score, queryCoverage: queryCoverage))
         }
-        return best
+        return matches.sorted { $0.score > $1.score }
     }
 
     /// Builds a clean, human-readable name for an off-menu item.
@@ -219,14 +279,70 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
         return meaningful.isEmpty ? "" : cleaned
     }
 
+    /// Extracts a leading quantity from a segment, understanding digits AND spoken
+    /// number words including compounds: "45 coffees" → 45, "forty five" → 45,
+    /// "a dozen wings" → 12, "twenty two" → 22. Returns 1 when no count is present.
     private func extractQuantity(from segment: String) -> Int {
-        let pattern = #"(\d+)\s+\w"#
-        if let range = segment.range(of: pattern, options: .regularExpression) {
-            let matched = String(segment[range])
-            let digits = matched.prefix(while: { $0.isNumber })
-            return Int(String(digits)) ?? 1
+        let tokens = segment.split(separator: " ").map(String.init)
+        // Find the first run of number tokens (digit or number word) and evaluate it.
+        var run: [String] = []
+        var started = false
+        for token in tokens {
+            if isNumberToken(token) {
+                run.append(token)
+                started = true
+            } else if started {
+                break   // run ended; take the first count only
+            }
         }
-        return 1
+        let value = evaluateNumberRun(run)
+        return value > 0 ? value : 1
+    }
+
+    private func isNumberToken(_ token: String) -> Bool {
+        if token.allSatisfy({ $0.isNumber }) && !token.isEmpty { return true }
+        return numberUnits[token] != nil || numberTens[token] != nil || token == "hundred"
+    }
+
+    /// Accumulates a run of number tokens the way English is spoken:
+    /// tens + units add ("forty" 40 + "five" 5 = 45), "hundred" multiplies.
+    private func evaluateNumberRun(_ run: [String]) -> Int {
+        guard !run.isEmpty else { return 0 }
+        var total = 0
+        var current = 0
+        for token in run {
+            if let digits = Int(token) {
+                current += digits
+            } else if let tens = numberTens[token] {
+                current += tens
+            } else if let unit = numberUnits[token] {
+                current += unit
+            } else if token == "hundred" {
+                current = max(1, current) * 100
+            }
+        }
+        total += current
+        return total
+    }
+
+    /// Crude singular stem so plural speech matches singular menu names
+    /// ("coffees" → "coffee", "wings" → "wing", "sandwiches" → "sandwich").
+    private func singularize(_ word: String) -> String {
+        guard word.count > 3 else { return word }
+        if word.hasSuffix("ies") { return String(word.dropLast(3)) + "y" }
+        if word.hasSuffix("es"), word.hasSuffix("ches") || word.hasSuffix("shes") || word.hasSuffix("ses") || word.hasSuffix("xes") {
+            return String(word.dropLast(2))
+        }
+        if word.hasSuffix("s"), !word.hasSuffix("ss") { return String(word.dropLast()) }
+        return word
+    }
+
+    /// Real food-signal tokens from a query: split, drop stopwords and pure
+    /// numbers, singularize what remains.
+    private func contentTokens(_ text: String) -> [String] {
+        text.split(separator: " ")
+            .map { singularize(String($0)) }
+            .filter { $0.count > 1 && !stopWords.contains($0) && !$0.allSatisfy(\.isNumber) }
     }
 
     struct ParsedModifier {
@@ -268,8 +384,8 @@ final class FuzzyMenuOrderParser: OrderParserProtocol {
     }
 
     private func tokenOverlapScore(query: [String], candidate: [String]) -> Double {
-        let qSet = Set(query.filter { $0.count > 2 })
-        let cSet = Set(candidate)
+        let qSet = Set(query.map { singularize($0) }.filter { $0.count > 2 })
+        let cSet = Set(candidate.map { singularize($0) })
         guard !qSet.isEmpty else { return 0 }
         return Double(qSet.intersection(cSet).count) / Double(qSet.count)
     }
