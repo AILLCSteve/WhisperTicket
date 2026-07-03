@@ -8,11 +8,18 @@ protocol AudioCaptureServiceProtocol: AnyObject {
     var isRecording: Bool { get }
     /// Normalized 0...1 microphone level, for the live waveform.
     var noiseLevel: Float { get }
-    /// Begin recording microphone audio to a file. Records continuously until
-    /// stopRecording() is called — no timers, no silence handling.
+    /// Called (on an arbitrary thread) each time a completed segment file is
+    /// finalized by silence-gated rotation — i.e. when the speaker pauses. The
+    /// final segment is NOT delivered here; it is returned by stopRecording().
+    /// Rotation keeps every file handed to recognition free of long internal
+    /// pauses, which SFSpeech would otherwise endpoint on and drop pre-pause text.
+    var onSegmentReady: ((URL) -> Void)? { get set }
+    /// Begin recording microphone audio. Records continuously until stopRecording()
+    /// with no length limit; internally rotates to a new file at each pause and
+    /// emits the closed file via onSegmentReady. No auto-stop timer.
     func startRecording() throws
-    /// Stop recording and return the finalized audio file URL, or nil if nothing
-    /// was captured. The caller owns the file and should delete it when done.
+    /// Stop recording and return the finalized (final) audio file URL, or nil if
+    /// nothing was captured. The caller owns the file and should delete it when done.
     func stopRecording() -> URL?
     func interruptionPublisher() -> AnyPublisher<Void, Never>
 }

@@ -31,7 +31,10 @@ final class LiveSessionViewModel {
     private let menuStore: MenuStoreProtocol
     private let upsellEngine: UpsellEngineProtocol
     private var cancellables = Set<AnyCancellable>()
-    private var transcriptionTask: Task<Void, Never>?
+    /// Feeds completed segment files, in recording order, to the serial consumer.
+    private var segmentContinuation: AsyncStream<URL>.Continuation?
+    /// The serial consumer for the CURRENT recording session.
+    private var segmentConsumerTask: Task<Void, Never>?
 
     let noiseWarningThreshold: Float = 0.75
 
@@ -51,11 +54,47 @@ final class LiveSessionViewModel {
         self.upsellEngine = upsellEngine
     }
 
-    /// Start recording microphone audio to a file. Records continuously until
-    /// stopRecording() — no timers, no silence handling. The transcript is produced
-    /// once, on stop, so nothing can erase mid-recording.
+    /// Start recording microphone audio. Capture rotates to a new file whenever
+    /// the speaker pauses (see AudioCaptureService); each finished segment is
+    /// transcribed in the background while recording continues. There is NO
+    /// recording length limit. The transcript is appended ONCE, on stop, after
+    /// all segments have been transcribed — so nothing can erase mid-recording
+    /// and nothing before a pause can be dropped.
     func startRecording() {
         do {
+            let (stream, continuation) = AsyncStream<URL>.makeStream()
+            segmentContinuation = continuation
+
+            // Capture-service callback fires on an arbitrary thread; hop to the
+            // MainActor before touching state.
+            audioCapture.onSegmentReady = { url in
+                Task { @MainActor [weak self] in
+                    self?.segmentContinuation?.yield(url)
+                }
+            }
+
+            // Serial consumer: transcribes segments strictly in arrival order.
+            segmentConsumerTask = Task { [weak self] in
+                var texts: [String] = []
+                for await url in stream {
+                    guard let self else { return }
+                    do {
+                        let text = try await self.transcriptionService.transcribe(fileURL: url)
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty { texts.append(trimmed) }
+                    } catch {
+                        // One bad segment must not sink the others. Surface it,
+                        // keep going — the remaining segments still transcribe.
+                        self.errorMessage = "Part of the recording could not be transcribed."
+                    }
+                    try? FileManager.default.removeItem(at: url)
+                }
+                guard let self else { return }
+                let joined = texts.joined(separator: " ")
+                self.appendTranscript(joined)          // no-op if empty (existing guard)
+                self.isFinalizingTranscription = false
+            }
+
             try audioCapture.startRecording()
             isRecording = true
             errorMessage = nil
@@ -64,8 +103,8 @@ final class LiveSessionViewModel {
             audioCapture.interruptionPublisher()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] in
-                    // Phone call etc. Treat like a stop: finalize the file and
-                    // transcribe what was captured so nothing is lost.
+                    // Phone call etc. Treat like a stop: finalize the last file
+                    // and transcribe everything captured so nothing is lost.
                     self?.finishRecording(interrupted: true)
                 }
                 .store(in: &cancellables)
@@ -77,6 +116,8 @@ final class LiveSessionViewModel {
 
         } catch {
             isRecording = false
+            segmentContinuation?.finish()
+            segmentContinuation = nil
             errorMessage = "Could not start recording: \(error.localizedDescription)"
         }
     }
@@ -85,37 +126,30 @@ final class LiveSessionViewModel {
         finishRecording(interrupted: false)
     }
 
-    /// Stop capture, then transcribe the recorded file once and append the result.
+    /// Stop capture, enqueue the final segment, and close the stream. The serial
+    /// consumer drains any remaining segments (usually zero — they transcribed
+    /// during recording) and then performs the single append + parse.
     private func finishRecording(interrupted: Bool) {
         guard isRecording else { return }
         isRecording = false
         cancellables.removeAll()   // stop meter poll + interruption subscription
         noiseLevel = 0.0
         showNoisyEnvironmentWarning = false
+        audioCapture.onSegmentReady = nil
 
-        let url = audioCapture.stopRecording()
+        isFinalizingTranscription = true   // cleared by the consumer when drained
+
+        let finalURL = audioCapture.stopRecording()
         if interrupted {
             errorMessage = "Recording interrupted — transcribing what was captured."
         }
 
-        guard let url else {
-            isFinalizingTranscription = false
-            return
+        if let finalURL {
+            segmentContinuation?.yield(finalURL)
         }
-
-        isFinalizingTranscription = true
-        transcriptionTask?.cancel()
-        transcriptionTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let text = try await self.transcriptionService.transcribe(fileURL: url)
-                self.appendTranscript(text)
-            } catch {
-                self.errorMessage = "Transcription failed: \(error.localizedDescription)"
-            }
-            self.isFinalizingTranscription = false
-            try? FileManager.default.removeItem(at: url)
-        }
+        segmentContinuation?.finish()
+        segmentContinuation = nil
+        // Deliberately NOT cancelling segmentConsumerTask — it must drain.
     }
 
     func triggerRepeatBack() {

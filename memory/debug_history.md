@@ -6,7 +6,71 @@
 
 ---
 
-## [2026-07-01] — Transcript Erasing FINALLY Fixed by Abandoning Streaming ASR — ARCHITECTURE CHANGE
+## [2026-07-03] — Transcript drop-after-pause RECURRED in build 56 — Root Cause = SFSpeech file recognition ALSO endpoints on silence — FIXED (segment rotation + reset stitching)
+
+**Area:** `Services/AudioCaptureService.swift`, `Services/SFSpeechTranscriptionService.swift`, `Services/Protocols.swift`, `ViewModels/LiveSessionViewModel.swift`
+**Type:** Architecture (recognition side). Supersedes the recognition claim of the 2026-07-01 build-56 entry below; that entry's CAPTURE insight (record-to-file) still stands.
+
+### Symptom
+Build 56 (record-then-transcribe) still lost everything before a pause on the
+*initial* recording: "I want a steak … [5s pause] … some mashed potatoes" → only
+"some mashed potatoes". (Adding to an existing transcript worked correctly.)
+
+### True root cause (the part all FOUR prior fixes missed)
+`SFSpeechRecognizer` runs an utterance endpointer in EVERY mode — streaming AND
+file-based (`SFSpeechURLRecognitionRequest`). On a long internal silence (~2s
+on-device) it resets its transcription context; hypotheses after the reset no
+longer contain pre-reset text. Build 56 used `shouldReportPartialResults = false`
+and resumed on the first `isFinal`, so it received exactly ONE string — which,
+after a mid-file reset, covers only the LAST utterance. The audio file had
+everything; the recognizer's *reported output* discarded the pre-pause text.
+Build 56 fixed CAPTURE but not RECOGNITION — the endpointer moved from mic to file.
+
+### The fix — two independent layers
+1. **Silence-gated segment rotation (capture, primary).** AudioCaptureService
+   watches its meter; after speech is heard and the level stays below
+   `speechLevelThreshold` (0.18) for `silenceRotationThreshold` (1.3s, < SFSpeech's
+   ~2s endpoint), it closes the current .m4a, emits it via `onSegmentReady`, and
+   starts a new file — during silence, so no speech is lost. Every file handed to
+   recognition is thus a short, pause-free utterance. No length cap; long segments
+   rotate on a 0.35s dip after 45s. Segments transcribe while recording continues.
+2. **Reset-stitching transcription (recognition, safety net).** For loud rooms
+   where the meter never dips, `shouldReportPartialResults = true` is used as an
+   OBSERVATION channel (still a finished file — NOT streaming ASR). `TranscriptStitcher`
+   keeps the epoch high-water hypothesis (kills the down-revision bug too), detects
+   a reset (new hypothesis < half the epoch best AND not a prefix), commits the
+   epoch, starts a new one; final = all epochs joined. Errors-after-text return the
+   stitched text; a `max(15s, 2.5×duration)` watchdog prevents a hung spinner.
+
+### Assembly (ViewModel — build-56 invariants preserved)
+`onSegmentReady` yields into an `AsyncStream<URL>`; a single serial consumer task
+transcribes segments in arrival order while recording continues; on stop the final
+URL is yielded and the stream finished; the consumer joins all segment texts and
+calls the EXISTING `appendTranscript(_:)` exactly ONCE per mic press — parse-once /
+append-only / no-duplication path untouched.
+
+### Hard rules (see transcriptiondebughandoff/TRANSCRIPTION FIX IMPLEMENTATION.md)
+- Do NOT set `shouldReportPartialResults = false` — that IS the build-56 bug.
+- Do NOT consume the first `isFinal` without the stitcher — same bug.
+- Do NOT add a second accumulation layer in the ViewModel, and do NOT cancel the
+  serial consumer in `finishRecording` (it must drain). No recording length cap.
+
+### Global?
+**Yes** — "SFSpeech FILE recognition also segments on internal silence; never
+consume only its final result — split audio at pauses and/or stitch over partials."
+A general, non-obvious iOS speech lesson. Rejected escape hatch if this ever fails
+on device: on-device Whisper (WhisperKit) — immune to the endpointer, but breaks
+the zero-dependency constraint. iOS 26 `SpeechAnalyzer` is the long-term fix once
+the deployment target moves off iOS 17.
+
+### Status
+Code complete; CI-verified build. Device verification pending (§8 checklist in the
+handoff doc): pause / multi-pause / no-limit / add-more / multi-seat / loud-room /
+interruption / silence.
+
+---
+
+## [2026-07-01] — Transcript Erasing FINALLY Fixed by Abandoning Streaming ASR — ARCHITECTURE CHANGE (SUPERSEDED 2026-07-03: capture insight stands; recognition claim was wrong — file recognition also endpoints on silence)
 
 **Area:** `Services/AudioCaptureService.swift`, `Services/SFSpeechTranscriptionService.swift`, `Services/Protocols.swift`, `ViewModels/LiveSessionViewModel.swift`
 **Type:** Architecture (the definitive fix; supersedes all prior transcript-reset entries)

@@ -6,18 +6,29 @@ erase by design). Duplication fixed. Haptics added. TestFlight distribution fixe
 **Latest build on TestFlight: v1.5.0 (build 56).** Next action is YOURS: verify on
 device.
 
-## Current architecture — voice ordering (build 56)
-**Record → then transcribe. No live/streaming recognition.**
-- `Services/AudioCaptureService.swift` — `AVAudioRecorder` writes mic audio to a
-  temp .m4a file continuously until `stopRecording() -> URL?`. Metering drives the
-  waveform. No timers, no silence handling.
-- `Services/SFSpeechTranscriptionService.swift` — one `transcribe(fileURL:) async
-  -> String`, on-device, over the whole file once (no partials).
-- `ViewModels/LiveSessionViewModel.swift` — on stop, transcribe the file and
-  APPEND to the active seat; parse only that chunk once. Erasing is structurally
-  impossible; no duplication (no re-parse of prior text).
-- **Do NOT revert to streaming SFSpeechRecognizer.** See `memory/debug_history.md`
-  (2026-07-01 architecture entry) — it took 3 failed streaming fixes to get here.
+## Current architecture — voice ordering (build 57+, 2026-07-03)
+**Record to rotating files → transcribe each segment → stitch. No live/streaming UI.**
+Build 56 (record-whole-file-then-transcribe) still dropped pre-pause text because
+`SFSpeechURLRecognitionRequest` ALSO endpoints on internal silence and reports only
+the last utterance. Fixed with two independent layers (see
+`transcriptiondebughandoff/TRANSCRIPTION FIX IMPLEMENTATION.md` and
+`memory/debug_history.md` 2026-07-03):
+- `Services/AudioCaptureService.swift` — `AVAudioRecorder`, no length limit, with
+  **silence-gated segment rotation**: after speech, 1.3s below the speech threshold
+  closes the current .m4a, emits it via `onSegmentReady`, starts a new file (during
+  silence → no speech lost). Every file to recognition is a short, pause-free chunk.
+- `Services/SFSpeechTranscriptionService.swift` — `shouldReportPartialResults = true`
+  as an OBSERVATION channel; `TranscriptStitcher` keeps epoch high-water text,
+  detects context resets, and stitches epochs. Errors-after-text return the text;
+  `max(15s, 2.5×dur)` watchdog prevents a hung spinner. (Still a finished FILE —
+  NOT streaming ASR.)
+- `ViewModels/LiveSessionViewModel.swift` — `onSegmentReady` → `AsyncStream<URL>`;
+  a single serial consumer transcribes segments in order while recording continues;
+  on stop, joins them and calls the EXISTING `appendTranscript(_:)` once per mic
+  press (build-56 parse-once / append-only / no-dup invariants preserved).
+- **Do NOT revert to streaming SFSpeechRecognizer; do NOT set partials=false; do NOT
+  consume the first isFinal without the stitcher; do NOT add a second accumulation
+  layer or cancel the serial consumer in finishRecording.**
 
 ## ✅ Verify on device (build 56, v1.5.0) — the whole point
 1. **Pause test:** mic on → "I want a steak" → **pause ~5s** → "and mashed
