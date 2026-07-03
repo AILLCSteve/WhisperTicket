@@ -1,10 +1,30 @@
-# HANDOFF — WaitTicket (2026-07-01)
+# HANDOFF — WaitTicket (2026-07-03)
 
 ## TL;DR
-Voice ordering was rebuilt from streaming ASR → **record-then-transcribe** (can't
-erase by design). Duplication fixed. Haptics added. TestFlight distribution fixed.
-**Latest build on TestFlight: v1.5.0 (build 56).** Next action is YOURS: verify on
-device.
+Voice ordering rebuilt to **record-then-transcribe + silence-gated segment
+rotation + reset-stitching** (pause no longer drops pre-pause text). Then a
+**parsing overhaul + menu-picker / disambiguation feature** landed.
+**Latest build on TestFlight: v1.5.0 (build 58).** Next action is YOURS: verify on
+device (see checklists below).
+
+## Build 58 — parsing + menu picker (2026-07-03)
+Parser (`FuzzyMenuOrderParser` + `TranscriptCleaner` in LiveSessionViewModel):
+- Word-boundary filler removal (fixed "better"→"bett" substring mangling).
+- Compound number-word quantities ("forty five" → 45) + plural stemming
+  ("coffees"→"coffee"); quantity no longer collapses to 1.
+- Coverage-weighted item selection (not first-match): reads clues ("ham and
+  cheese" → Ham & Cheese); genuine ties → `DraftItem.alternativeMenuItemIds`
+  (ambiguity), surfaced for confirmation.
+New reusable `Views/Components/MenuPickerSheet.swift` (search whole menu by
+category + suggestions + custom-item). Wired into `TableOrderEntryView`:
+- Per-seat **Add More** (now a + pill) → picker (was a no-op seat-switch = the bug).
+- Footer **Add +** left of Type → picker for active seat.
+- Per-item **Replace** (⤢ icon left of X) → picker seeded with related items.
+- **Confirm item** card: one-tap candidate chips + Browse menu / Keep guess.
+VM methods: `addMenuItem`, `replaceItem(withMenuItem:/withCustomName:)`,
+`resolveDisambiguation`, `keepGuess`, `itemsNeedingChoice`.
+Device checks: bare "ham" prompts; "ham and cheese" auto-picks; "forty five
+coffees" → qty 45; Add More / footer + / Replace / custom all add correctly.
 
 ## Current architecture — voice ordering (build 57+, 2026-07-03)
 **Record to rotating files → transcribe each segment → stitch. No live/streaming UI.**
