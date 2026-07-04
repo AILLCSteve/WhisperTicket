@@ -1,94 +1,59 @@
-# HANDOFF — WaitTicket (2026-07-03)
+# HANDOFF — WaitTicket (2026-07-03, session 2)
 
 ## TL;DR
-Voice ordering rebuilt to **record-then-transcribe + silence-gated segment
-rotation + reset-stitching** (pause no longer drops pre-pause text). Then a
-**parsing overhaul + menu-picker / disambiguation feature** landed.
-**Latest build on TestFlight: v1.5.0 (build 58).** Next action is YOURS: verify on
-device (see checklists below).
+Three features landed on `main` this session:
+1. **Confirm Order screen now has "Add from Menu"** (commit `80c5c75`).
+2. **Menu import parser rewritten** — no more titles/fine-print/headings as
+   items (same commit, CI green, on TestFlight).
+3. **Visual overhaul** (commit `312873f`): zoom-to-table transition, seat
+   swipe navigation, wall drawing in the floor editor. CI was in progress at
+   handoff time — check `gh run watch 28689588375`.
 
-## Build 58 — parsing + menu picker (2026-07-03)
-Parser (`FuzzyMenuOrderParser` + `TranscriptCleaner` in LiveSessionViewModel):
-- Word-boundary filler removal (fixed "better"→"bett" substring mangling).
-- Compound number-word quantities ("forty five" → 45) + plural stemming
-  ("coffees"→"coffee"); quantity no longer collapses to 1.
-- Coverage-weighted item selection (not first-match): reads clues ("ham and
-  cheese" → Ham & Cheese); genuine ties → `DraftItem.alternativeMenuItemIds`
-  (ambiguity), surfaced for confirmation.
-New reusable `Views/Components/MenuPickerSheet.swift` (search whole menu by
-category + suggestions + custom-item). Wired into `TableOrderEntryView`:
-- Per-seat **Add More** (now a + pill) → picker (was a no-op seat-switch = the bug).
-- Footer **Add +** left of Type → picker for active seat.
-- Per-item **Replace** (⤢ icon left of X) → picker seeded with related items.
-- **Confirm item** card: one-tap candidate chips + Browse menu / Keep guess.
-VM methods: `addMenuItem`, `replaceItem(withMenuItem:/withCustomName:)`,
-`resolveDisambiguation`, `keepGuess`, `itemsNeedingChoice`.
-Device checks: bare "ham" prompts; "ham and cheese" auto-picks; "forty five
-coffees" → qty 45; Add More / footer + / Replace / custom all add correctly.
+## What to verify on device
+1. **Confirm Order**: order something → Send → bottom bar has "Add from Menu"
+   (opens searchable picker) and "Type Item". Adding keeps the sheet open and
+   the item appears in the review list.
+2. **Menu import**: Menu Admin → re-import the Applebee's PDF / any menu photo.
+   Expect: real category names (Appetizers, Salads…), no "PRICE"/"FOOD ITEM"
+   items, no title item, no fine-print items, no unselectable heading-items.
+   Prices are best-effort FIFO pairing (source PDFs with scrambled column
+   text can still drift a little — structure should always be right).
+3. **Zoom transition** (iOS 18+ only): Floor map → tap a table → the tile
+   itself zooms into the order screen; swipe down to fall back to the map.
+   Works from the Tables list cards too, and into active tickets.
+4. **Seat swipe**: on the order screen swipe left/right on the order area →
+   moves between seats with a haptic.
+5. **Walls**: Floor → Edit Map → Map tab → "Walls" tool → tap to place points
+   (snaps to 20pt grid), Finish → wall appears; tap a wall → red highlight →
+   Delete Wall. Walls show on the live floor map. Existing table positions
+   must survive the update (walls decode is backward-compatible).
 
-## Current architecture — voice ordering (build 57+, 2026-07-03)
-**Record to rotating files → transcribe each segment → stitch. No live/streaming UI.**
-Build 56 (record-whole-file-then-transcribe) still dropped pre-pause text because
-`SFSpeechURLRecognitionRequest` ALSO endpoints on internal silence and reports only
-the last utterance. Fixed with two independent layers (see
-`transcriptiondebughandoff/TRANSCRIPTION FIX IMPLEMENTATION.md` and
-`memory/debug_history.md` 2026-07-03):
-- `Services/AudioCaptureService.swift` — `AVAudioRecorder`, no length limit, with
-  **silence-gated segment rotation**: after speech, 1.3s below the speech threshold
-  closes the current .m4a, emits it via `onSegmentReady`, starts a new file (during
-  silence → no speech lost). Every file to recognition is a short, pause-free chunk.
-- `Services/SFSpeechTranscriptionService.swift` — `shouldReportPartialResults = true`
-  as an OBSERVATION channel; `TranscriptStitcher` keeps epoch high-water text,
-  detects context resets, and stitches epochs. Errors-after-text return the text;
-  `max(15s, 2.5×dur)` watchdog prevents a hung spinner. (Still a finished FILE —
-  NOT streaming ASR.)
-- `ViewModels/LiveSessionViewModel.swift` — `onSegmentReady` → `AsyncStream<URL>`;
-  a single serial consumer transcribes segments in order while recording continues;
-  on stop, joins them and calls the EXISTING `appendTranscript(_:)` once per mic
-  press (build-56 parse-once / append-only / no-dup invariants preserved).
-- **Do NOT revert to streaming SFSpeechRecognizer; do NOT set partials=false; do NOT
-  consume the first isFinal without the stitcher; do NOT add a second accumulation
-  layer or cancel the serial consumer in finishRecording.**
+## Key implementation notes (session 2)
+- `MenuTextParser.swift` — full rewrite. Algorithm + traps documented in
+  `memory/debug_history.md` (2026-07-03 entry). Python mirror used for
+  verification lives in the session scratchpad (parser_proto.py) — recreate
+  from the debug-history notes if needed.
+- `RepeatBackSheet` gained `menu:` + `onAddMenuItem:` optional params; both
+  call sites (TableOrderEntryView, LiveSessionView) pass
+  `services.menuStore.menu` and `vm.addMenuItem`. Adds NO LONGER dismiss the
+  confirm sheet (intentional UX change).
+- `FloorPlan` now has `walls: [FloorWall]` (polyline, canvas coords,
+  thickness). Custom `init(from:)` uses decodeIfPresent — do NOT revert to
+  synthesized Codable or every existing installation's floor plan wipes.
+- `Views/Components/FloorChromeEffects.swift` (new): `tableZoomSource` /
+  `tableZoomDestination` (iOS 18 `.navigationTransition(.zoom)` behind
+  `#available`, no-op on 17), `ChromePressStyle`, `FloorWallsLayer`,
+  `WallDraftLayer`. Zoom IDs are keyed by table NAME ("tile_<name>") so the
+  order-entry and ticket-editor destinations can both match the same tile.
+- Editor canvas is now 900x700 — SAME space as FloorMapEmbedView (old
+  600x800 mismatch fixed). Live map offsets everything +40,+40; editor draws
+  raw coordinates. Walls are stored in the shared (raw) space.
+- Build 58 items (menu picker, disambiguation, record-then-transcribe ASR)
+  unchanged — see previous HANDOFF content in git history (`850f678`).
 
-## ✅ Verify on device (build 56, v1.5.0) — the whole point
-1. **Pause test:** mic on → "I want a steak" → **pause ~5s** → "and mashed
-   potatoes" → stop. Transcript must show the FULL sentence. (Note: text now
-   appears AFTER you stop — waveform while recording, "Processing…", then text.)
-2. **Add-more test:** record an item, stop; record again same seat, add another →
-   both present, none duplicated, no limit on length.
-3. **Multi-seat:** switch seats, record → each seat keeps its own order.
-Report PASS/FAIL for each.
-
-## ✅ Done this session (all on main, CI green)
-- Transcript erase + duplication: streaming torn out, record-then-transcribe in
-  (commit 326611c). Earlier streaming attempts: 13828a6, 53ebda7 (superseded).
-- Haptics: record/stop/send/add tactile feedback (0490b70, `Views/Components/Haptics.swift`).
-- CI/macOS-26 fixes: P12 → /usr/bin/openssl (6288c54); post-upload non-blocking +
-  403 fix (2dbb180). **Pending ASC agreement** was the altool-19 blocker — YOU
-  accepted it.
-- TestFlight distribution: betaGroups query used illegal filter[isInternalGroup]
-  (400 every run) → fixed to client-side filter; added `scripts/asc_report.py`
-  diagnostics; extended build-visibility wait (15b758f). Internal group **"Dev1"**
-  exists with autoAllBuilds=True → valid builds auto-distribute. v53/v54 confirmed
-  VALID in ASC.
-
-## ⚠️ If nothing reaches your phone
-Distribution IS wired (Dev1, auto-distribute). If you don't see builds in the
-TestFlight app: confirm your Apple ID is an **accepted tester in "Dev1"** (ASC →
-TestFlight → Internal Testing → Dev1 → Testers) and that you're signed into
-TestFlight with that same Apple ID.
-
-## UI polish status
-Haptics shipped. Further visual "stunning" work is blocked on ME being unable to
-see the app render (Windows, no sim). When ready: send screenshots of Floor / Live
-session / Ticket editor / Tickets list / Menu admin and I'll do targeted
-refinements you review on TestFlight. (App already has a deliberate "Dark POS"
-design system in `Views/Components/ChromeStyle.swift`.)
-
-## Environment facts
-- **PAID Apple Developer** (team M37X5J35F8), app com.whisperticket.app / App ID
-  6760738060. TestFlight upload works on every `main` push.
-- Windows dev box → **CI (GitHub Actions macOS) is Claude's only build/compile
-  verification.** On-device behavior + visuals are user-verified.
-- Workflow: commit → push `main` → `gh run watch <id>` → green auto-uploads to TF.
-- macos-latest = macOS 26; keep P12 gen pinned to /usr/bin/openssl.
+## Environment facts (unchanged)
+- PAID Apple Developer (team M37X5J35F8), app com.whisperticket.app.
+- Windows dev box → CI (GitHub Actions macOS) is the only build verification.
+- Workflow: commit → push main → `gh run watch <id>` → green auto-uploads to
+  TestFlight (internal group "Dev1", auto-distribute).
+- iOS deployment target 17.0; zoom transition requires iOS 18+ at runtime.

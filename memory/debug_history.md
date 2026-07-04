@@ -474,3 +474,65 @@ Any future upsell rule additions must use the tag taxonomy from `MenuV1.sample.j
 
 ### Global?
 No — project-specific tag taxonomy.
+
+---
+
+## [2026-07-03] — MenuTextParser — Menu import garbage (title/fine-print/headings as items) — RESOLVED
+
+**Area:** `Services/MenuTextParser.swift` (shared by PDF + Photo import)
+**Type:** Bug cluster (heuristics) — full rewrite
+
+### Symptoms (user-reported, reproduced on real menus)
+1. Menu title imported as an item ("Applebee's Menu Prices 2024").
+2. Fine print imported as items ("A la carte.", "Served with a breadstick.",
+   table headers "PRICE"/"FOOD ITEM", copyright/disclaimer prose).
+3. Real item names became unselectable CATEGORY headings with other items
+   nested under them.
+4. Prices wildly mispaired.
+
+### Root causes (confirmed against extracted PDF text)
+- `isLikelyCategoryHeader` treated ANY Title-Case line as a header when no
+  price appeared within 3 lines. Real-world PDFs (Applebee's) extract as
+  COLUMN RUNS — a block of 12-16 price lines followed by a block of name
+  lines — so most item names had no nearby price and became categories.
+- Line-adjacent name+price pairing cannot work on column-run layouts at all.
+- Noise filtering only knew URLs/page numbers; nothing for table headers,
+  nav rows ("Appetizers | Soups | ..."), titles, or fine-print sentences.
+
+### Fix (rewrite, validated via Python mirror on real corpora)
+- Headers: only (a) ALL-CAPS ending in "MENU" (brand possessive stripped,
+  "APPLEBEE'S APPETIZERS MENU" → "Appetizers"), or (b) ALL meaningful tokens
+  in a category vocabulary (~90 words; stopwords and/of/the/house ignored).
+  Vocab headers are demoted if followed by a description-like line ("Pizza
+  Sub" + ingredient list) and, in priced docs, ignored while prices are
+  queued (headers never consume a price; "Chicken Quesadilla" is all-vocab).
+- Priced pairing: FIFO price queue + name queue. Handles prices-first column
+  runs (queue persists ACROSS category headers — required) and name-first
+  layouts (name, desc lines, price). Categories where nothing got a price
+  are dropped as title junk.
+- Priceless (Yelp-style): name → wrapped-description state machine; desc
+  continues until sentence-terminal punctuation (max 3 name-like lines).
+- Noise/fine-print lists greatly expanded (priced-mode-only for sentence
+  fine print — in priceless docs sentences are descriptions).
+
+### Verification
+Python mirror (scratchpad parser_proto.py) on pypdf-extracted text:
+- Applebee's PDF: 93 items / 15 correct categories, zero junk items.
+- Subway Yelp PDF (priceless, 25pp): 198 items / 8 correct categories, with
+  descriptions.
+- Synthetic taco menu (name-first, ALL-CAPS names) + classic inline-price
+  menu: exact.
+
+### Watch out / traps hit during tuning
+- DESC_STARTERS word lists silently DROP real items: "The Classic Combo",
+  "Fresh Brewed Coffee", "Crispy Chicken Tender Salad" — never reject a
+  name candidate solely for starting with "the/fresh/crispy". Every dropped
+  name also SHIFTS FIFO price alignment for the rest of the document.
+- Calorie/fine-print regexes must not kill PRICE lines like
+  "4.68 taco (438 cal.)" — check for a price before classifying as noise.
+- Vocabulary must not contain common item words ("beef", "classic", "bacon")
+  or the all-vocab rule promotes real items to headers.
+
+### Global?
+Partially — the "column-run PDF extraction breaks line-adjacent pairing"
+insight applies to any PDFKit/pypdf text extraction of tabular layouts.
