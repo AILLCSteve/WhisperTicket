@@ -70,11 +70,17 @@ struct LiveSessionView: View {
                     .sheet(item: $activeSheet) { sheet in
                         switch sheet {
                         case .repeatBack:
-                            RepeatBackSheet(draft: vm.draft, onAddItem: { itemText in
-                                activeSheet = nil
-                                vm.showRepeatBack = false
-                                vm.addManualItem(name: itemText)
-                            }) {
+                            RepeatBackSheet(
+                                draft: vm.draft,
+                                onAddItem: { itemText in
+                                    // Keep the confirm sheet open so the new item shows in the review list.
+                                    vm.addManualItem(name: itemText)
+                                },
+                                menu: services.menuStore.menu,
+                                onAddMenuItem: { item in
+                                    vm.addMenuItem(item)
+                                }
+                            ) {
                                 activeSheet = nil
                                 vm.showRepeatBack = false
                                 Task { await confirmAndSend(vm: vm) }
@@ -426,11 +432,14 @@ struct RepeatBackSheet: View {
     let draft: TicketDraft
     var seatLabels: [Int: String] = [:]
     var onAddItem: ((String) -> Void)? = nil
+    var menu: MenuV1? = nil
+    var onAddMenuItem: ((MenuItem) -> Void)? = nil
     let onSendToKitchen: () -> Void
     @Environment(\.dismiss) var dismiss
 
     @State private var showAddItem = false
     @State private var addItemText = ""
+    @State private var showMenuPicker = false
 
     var body: some View {
         NavigationStack {
@@ -461,14 +470,25 @@ struct RepeatBackSheet: View {
                     Button("Edit Order") { dismiss() }
                         .foregroundStyle(Color.chromeSilverLow)
                 }
-                if onAddItem != nil {
-                    ToolbarItem(placement: .bottomBar) {
-                        Button {
-                            addItemText = ""
-                            showAddItem = true
-                        } label: {
-                            Label("Add Item", systemImage: "plus.circle")
-                                .foregroundStyle(Color.chromePrimary)
+                if onAddItem != nil || (menu != nil && onAddMenuItem != nil) {
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        if menu != nil && onAddMenuItem != nil {
+                            Button {
+                                showMenuPicker = true
+                            } label: {
+                                Label("Add from Menu", systemImage: "menucard")
+                                    .foregroundStyle(Color.chromePrimary)
+                            }
+                        }
+                        Spacer()
+                        if onAddItem != nil {
+                            Button {
+                                addItemText = ""
+                                showAddItem = true
+                            } label: {
+                                Label("Type Item", systemImage: "keyboard")
+                                    .foregroundStyle(Color.chromePrimary)
+                            }
                         }
                     }
                 }
@@ -494,6 +514,22 @@ struct RepeatBackSheet: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Item will be added to the current seat's order.")
+            }
+            .sheet(isPresented: $showMenuPicker) {
+                if let menu {
+                    MenuPickerSheet(
+                        title: "Add Item",
+                        menu: menu,
+                        onSelect: { item in
+                            Haptics.selection()
+                            onAddMenuItem?(item)
+                        },
+                        onCustom: { name in
+                            Haptics.selection()
+                            onAddItem?(name)
+                        }
+                    )
+                }
             }
         }
     }

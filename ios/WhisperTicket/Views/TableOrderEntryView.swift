@@ -113,10 +113,18 @@ struct TableOrderEntryView: View {
             let seatLabelMap = Dictionary(
                 uniqueKeysWithValues: seatConfigs.enumerated().map { ($0.offset + 1, $0.element.label) }
             )
-            RepeatBackSheet(draft: vm.draft, seatLabels: seatLabelMap, onAddItem: { itemText in
-                vm.showRepeatBack = false
-                vm.addManualItem(name: itemText)
-            }) {
+            RepeatBackSheet(
+                draft: vm.draft,
+                seatLabels: seatLabelMap,
+                onAddItem: { itemText in
+                    // Keep the confirm sheet open so the new item shows in the review list.
+                    vm.addManualItem(name: itemText)
+                },
+                menu: services.menuStore.menu,
+                onAddMenuItem: { item in
+                    vm.addMenuItem(item)
+                }
+            ) {
                 vm.showRepeatBack = false
                 Task { await createAndSend(vm: vm) }
             }
