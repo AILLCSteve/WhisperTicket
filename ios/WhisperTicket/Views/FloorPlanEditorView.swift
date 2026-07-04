@@ -12,10 +12,18 @@ struct FloorPlanEditorView: View {
     @State private var newTableSeats = "4"
     @State private var showResetConfirm = false
     @State private var showSectionEditor = false
+    @State private var canvasTool: CanvasTool = .tables
+    @State private var wallDraftPoints: [CGPoint] = []
+    @State private var selectedWallId: String?
 
     enum EditorMode: String, CaseIterable {
         case list = "List"
         case canvas = "Map"
+    }
+
+    enum CanvasTool: String, CaseIterable {
+        case tables = "Tables"
+        case walls = "Walls"
     }
 
     var body: some View {
@@ -51,6 +59,11 @@ struct FloorPlanEditorView: View {
                             services.floorPlanStore.resetTablePositions()
                         } label: {
                             Label("Reset Table Positions", systemImage: "arrow.uturn.backward.circle")
+                        }
+                        Button {
+                            services.floorPlanStore.clearWalls()
+                        } label: {
+                            Label("Clear Walls", systemImage: "eraser")
                         }
                         Divider()
                         Button(role: .destructive) {
@@ -134,10 +147,67 @@ struct FloorPlanEditorView: View {
 
     // MARK: - Canvas Editor
 
+    /// Canvas is 900x700 — the SAME coordinate space as the live floor map
+    /// (FloorMapEmbedView), so nothing placed near an edge gets clipped.
     private var canvasEditor: some View {
-        ScrollView([.horizontal, .vertical]) {
-            CanvasView()
-                .frame(width: 600, height: 800)
+        VStack(spacing: 0) {
+            canvasToolBar
+            ScrollView([.horizontal, .vertical]) {
+                CanvasView(
+                    tool: canvasTool,
+                    wallDraftPoints: $wallDraftPoints,
+                    selectedWallId: $selectedWallId
+                )
+                .frame(width: 900, height: 700)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var canvasToolBar: some View {
+        HStack(spacing: 10) {
+            Picker("Tool", selection: $canvasTool) {
+                ForEach(CanvasTool.allCases, id: \.self) { Text($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 200)
+
+            Spacer()
+
+            if canvasTool == .walls {
+                if !wallDraftPoints.isEmpty {
+                    Button {
+                        wallDraftPoints.removeLast()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    Button("Finish") {
+                        if wallDraftPoints.count >= 2 {
+                            services.floorPlanStore.addWall(FloorWall(points: wallDraftPoints))
+                        }
+                        wallDraftPoints = []
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(wallDraftPoints.count < 2)
+                } else if let selectedWallId {
+                    Button(role: .destructive) {
+                        services.floorPlanStore.deleteWall(id: selectedWallId)
+                        self.selectedWallId = nil
+                    } label: {
+                        Label("Delete Wall", systemImage: "trash")
+                    }
+                } else {
+                    Text("Tap to place wall points")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+        .onChange(of: canvasTool) { _, _ in
+            wallDraftPoints = []
+            selectedWallId = nil
         }
     }
 
@@ -150,29 +220,70 @@ struct FloorPlanEditorView: View {
 // MARK: - Canvas with Draggable Tables
 
 struct CanvasView: View {
+    let tool: FloorPlanEditorView.CanvasTool
+    @Binding var wallDraftPoints: [CGPoint]
+    @Binding var selectedWallId: String?
     @Environment(\.appServices) var services
+
+    /// Snap wall points to a 20pt grid for clean architectural lines.
+    private func snapped(_ p: CGPoint) -> CGPoint {
+        CGPoint(x: (p.x / 20).rounded() * 20, y: (p.y / 20).rounded() * 20)
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Grid background
-            Canvas { ctx, size in
-                let spacing: CGFloat = 40
-                var x: CGFloat = 0
-                while x < size.width {
-                    let path = Path { p in p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height)) }
-                    ctx.stroke(path, with: .color(.secondary.opacity(0.1)), lineWidth: 0.5)
-                    x += spacing
-                }
-                var y: CGFloat = 0
-                while y < size.height {
-                    let path = Path { p in p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y)) }
-                    ctx.stroke(path, with: .color(.secondary.opacity(0.1)), lineWidth: 0.5)
-                    y += spacing
-                }
-            }
+            gridBackground
+
+            FloorWallsLayer(
+                walls: services.floorPlanStore.floorPlan.walls,
+                highlightedWallId: selectedWallId
+            )
+
+            WallDraftLayer(points: wallDraftPoints)
 
             ForEach(services.floorPlanStore.floorPlan.tables) { table in
-                DraggableTableTile(table: table)
+                DraggableTableTile(table: table, isInteractive: tool == .tables)
+                    .opacity(tool == .tables ? 1 : 0.45)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(coordinateSpace: .local) { location in
+            guard tool == .walls else { return }
+            handleWallTap(at: location)
+        }
+        .animation(.easeInOut(duration: 0.2), value: tool)
+    }
+
+    private func handleWallTap(at location: CGPoint) {
+        if wallDraftPoints.isEmpty {
+            // Not drawing yet: tapping near an existing wall toggles selection.
+            if let hit = services.floorPlanStore.floorPlan.walls.first(where: { $0.distance(to: location) < 16 }) {
+                selectedWallId = (selectedWallId == hit.id) ? nil : hit.id
+                return
+            }
+            // Tapping empty space clears a selection before drawing starts.
+            if selectedWallId != nil {
+                selectedWallId = nil
+                return
+            }
+        }
+        wallDraftPoints.append(snapped(location))
+    }
+
+    private var gridBackground: some View {
+        Canvas { ctx, size in
+            let spacing: CGFloat = 40
+            var x: CGFloat = 0
+            while x < size.width {
+                let path = Path { p in p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height)) }
+                ctx.stroke(path, with: .color(.secondary.opacity(0.1)), lineWidth: 0.5)
+                x += spacing
+            }
+            var y: CGFloat = 0
+            while y < size.height {
+                let path = Path { p in p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y)) }
+                ctx.stroke(path, with: .color(.secondary.opacity(0.1)), lineWidth: 0.5)
+                y += spacing
             }
         }
     }
@@ -180,6 +291,7 @@ struct CanvasView: View {
 
 struct DraggableTableTile: View {
     let table: FloorTable
+    var isInteractive: Bool = true
     @Environment(\.appServices) var services
 
     // Local position state — updated immediately in onEnded so the tile never
@@ -187,8 +299,9 @@ struct DraggableTableTile: View {
     @State private var localPosition: CGSize
     @GestureState private var dragDelta = CGSize.zero
 
-    init(table: FloorTable) {
+    init(table: FloorTable, isInteractive: Bool = true) {
         self.table = table
+        self.isInteractive = isInteractive
         _localPosition = State(initialValue: table.position)
     }
 
@@ -225,6 +338,7 @@ struct DraggableTableTile: View {
                     services.floorPlanStore.upsertTable(updated)
                 }
         )
+        .allowsHitTesting(isInteractive)
         // Sync from external changes (e.g. Reset to Default) so localPosition
         // stays in step with the authoritative store value.
         .onChange(of: table.position) { _, newPos in

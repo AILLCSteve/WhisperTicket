@@ -6,6 +6,24 @@ import SwiftUI
 struct FloorPlan: Codable {
     var tables: [FloorTable] = []
     var sections: [ServerSection] = []
+    var walls: [FloorWall] = []
+
+    init(tables: [FloorTable] = [], sections: [ServerSection] = [], walls: [FloorWall] = []) {
+        self.tables = tables
+        self.sections = sections
+        self.walls = walls
+    }
+
+    // Custom decoding: `walls` was added after v2 plans shipped. decodeIfPresent
+    // keeps old persisted plans loading instead of silently resetting to default.
+    enum CodingKeys: String, CodingKey { case tables, sections, walls }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tables = try c.decodeIfPresent([FloorTable].self, forKey: .tables) ?? []
+        sections = try c.decodeIfPresent([ServerSection].self, forKey: .sections) ?? []
+        walls = try c.decodeIfPresent([FloorWall].self, forKey: .walls) ?? []
+    }
 
     /// Sensible default restaurant layout on first launch.
     static var `default`: FloorPlan {
@@ -39,6 +57,47 @@ struct FloorTable: Codable, Identifiable, Hashable {
         self.name = name
         self.position = position
         self.seats = seats
+    }
+}
+
+/// A wall drawn on the floor plan canvas — an open polyline of points in the
+/// shared 900x700 canvas coordinate space. Lets the plan mirror the real room
+/// shape (dining room outline, bar counter, patio divider).
+struct FloorWall: Codable, Identifiable, Equatable {
+    var id: String = UUID().uuidString
+    var points: [CGPoint]
+    var thickness: CGFloat = 10
+
+    enum CodingKeys: String, CodingKey { case id, points, thickness }
+
+    init(points: [CGPoint], thickness: CGFloat = 10) {
+        self.points = points
+        self.thickness = thickness
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        points = try c.decodeIfPresent([CGPoint].self, forKey: .points) ?? []
+        thickness = try c.decodeIfPresent(CGFloat.self, forKey: .thickness) ?? 10
+    }
+
+    /// Shortest distance from a point to any segment of this wall (hit testing).
+    func distance(to p: CGPoint) -> CGFloat {
+        guard points.count >= 2 else { return .infinity }
+        var best = CGFloat.infinity
+        for i in 0 ..< points.count - 1 {
+            best = min(best, Self.segmentDistance(p, points[i], points[i + 1]))
+        }
+        return best
+    }
+
+    private static func segmentDistance(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let abx = b.x - a.x, aby = b.y - a.y
+        let lengthSq = abx * abx + aby * aby
+        guard lengthSq > 0 else { return hypot(p.x - a.x, p.y - a.y) }
+        let t = max(0, min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / lengthSq))
+        return hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby))
     }
 }
 

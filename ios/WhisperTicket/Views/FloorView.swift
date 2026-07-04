@@ -4,6 +4,7 @@ import SwiftUI
 /// Defaults to the visual Map view (canvas). Tables tab shows the live ticket list.
 struct FloorView: View {
     @Environment(\.appServices) var services
+    @Namespace private var tableZoomNS
     @State private var selectedTab: FloorTab = .map
     @State private var navigateToOrder: FloorTable?
     @State private var navigateToTicket: Ticket?
@@ -32,7 +33,7 @@ struct FloorView: View {
 
                 ZStack {
                     if selectedTab == .map {
-                        FloorMapEmbedView(activeTickets: activeTickets, onTapTable: { table in
+                        FloorMapEmbedView(activeTickets: activeTickets, zoomNamespace: tableZoomNS, onTapTable: { table in
                             if activeTickets[table.name] != nil {
                                 navigateToTicket = activeTickets[table.name]
                             } else {
@@ -79,8 +80,14 @@ struct FloorView: View {
             .refreshable { await loadActiveTickets() }
             .task { await loadActiveTickets() }
             .onAppear { Task { await loadActiveTickets() } }
-            .navigationDestination(item: $navigateToOrder) { TableOrderEntryView(table: $0) }
-            .navigationDestination(item: $navigateToTicket) { TicketEditorView(ticket: $0) }
+            .navigationDestination(item: $navigateToOrder) { table in
+                TableOrderEntryView(table: table)
+                    .tableZoomDestination(id: "tile_\(table.name)", in: tableZoomNS)
+            }
+            .navigationDestination(item: $navigateToTicket) { ticket in
+                TicketEditorView(ticket: ticket)
+                    .tableZoomDestination(id: "tile_\(ticket.tableNumber)", in: tableZoomNS)
+            }
             .sheet(isPresented: $showEditor) { FloorPlanEditorView() }
             .alert("Custom Table", isPresented: $showCustomEntry) {
                 TextField("e.g. Bar 3, Booth A", text: $customTableName)
@@ -114,6 +121,7 @@ struct FloorView: View {
                                 table: table, ticket: activeTickets[table.name]!,
                                 section: plan.sections.first { $0.tableIds.contains(table.id) }
                             ) { navigateToTicket = activeTickets[table.name] }
+                            .tableZoomSource(id: "tile_\(table.name)", in: tableZoomNS)
                         }
                     }
                     .padding(.horizontal)
@@ -155,6 +163,7 @@ struct FloorView: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 12)], spacing: 12) {
             ForEach(tables) { table in
                 ChromeAvailableTableCard(table: table) { navigateToOrder = table }
+                    .tableZoomSource(id: "tile_\(table.name)", in: tableZoomNS)
             }
             Button { showCustomEntry = true } label: {
                 VStack(spacing: 6) {
@@ -184,6 +193,7 @@ struct FloorView: View {
 struct FloorMapEmbedView: View {
     @Environment(\.appServices) var services
     let activeTickets: [String: Ticket]
+    var zoomNamespace: Namespace.ID? = nil
     let onTapTable: (FloorTable) -> Void
 
     var body: some View {
@@ -209,18 +219,38 @@ struct FloorMapEmbedView: View {
                 }
                 .frame(width: 900, height: 700)
 
+                FloorWallsLayer(walls: services.floorPlanStore.floorPlan.walls)
+                    .frame(width: 900, height: 700)
+                    .offset(x: 40, y: 40)
+
                 ForEach(services.floorPlanStore.floorPlan.tables) { table in
                     let ticket = activeTickets[table.name]
                     Button { onTapTable(table) } label: {
                         MapTableTile(table: table, ticket: ticket)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ChromePressStyle())
+                    .modifier(TileZoomSourceIfAvailable(id: "tile_\(table.name)", namespace: zoomNamespace))
                     .offset(x: table.position.width + 40, y: table.position.height + 40)
                 }
             }
             .frame(minWidth: 900, minHeight: 700)
         }
         .background(Color.chromeBackground)
+    }
+}
+
+/// Applies the zoom-transition source only when a namespace was provided
+/// (FloorMapEmbedView is also used from contexts without the zoom navigation).
+private struct TileZoomSourceIfAvailable: ViewModifier {
+    let id: String
+    let namespace: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let namespace {
+            content.tableZoomSource(id: id, in: namespace)
+        } else {
+            content
+        }
     }
 }
 

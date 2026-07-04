@@ -66,6 +66,24 @@ final class FloorPlanStore {
         floorPlan.tables.first { $0.name.lowercased() == name.lowercased() }
     }
 
+    // MARK: - Wall management
+
+    func addWall(_ wall: FloorWall) {
+        guard wall.points.count >= 2 else { return }
+        floorPlan.walls.append(wall)
+        save()
+    }
+
+    func deleteWall(id: String) {
+        floorPlan.walls.removeAll { $0.id == id }
+        save()
+    }
+
+    func clearWalls() {
+        floorPlan.walls.removeAll()
+        save()
+    }
+
     // MARK: - Section management
 
     func upsertSection(_ section: ServerSection) {

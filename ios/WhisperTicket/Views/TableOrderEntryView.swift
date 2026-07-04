@@ -102,6 +102,18 @@ struct TableOrderEntryView: View {
                     .padding(.top, 14)
                     .padding(.bottom, 180)
                 }
+                // Swipe left/right anywhere on the order area to move between
+                // seats. simultaneousGesture keeps vertical scrolling intact;
+                // the dominance check ignores diagonal scroll gestures.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 30)
+                        .onEnded { value in
+                            let dx = value.translation.width
+                            let dy = value.translation.height
+                            guard abs(dx) > 60, abs(dx) > abs(dy) * 1.5 else { return }
+                            switchSeat(by: dx < 0 ? 1 : -1, vm: vm)
+                        }
+                )
             }
 
             bottomBar(vm: vm)
@@ -502,6 +514,16 @@ struct TableOrderEntryView: View {
         activeSeatIndex = idx
         vm.activeSeatNumber = seatNumber
         vm.activeSeatLabel = seatConfigs[idx].label
+    }
+
+    /// Swipe navigation between seats (left = next guest, right = previous).
+    private func switchSeat(by delta: Int, vm: LiveSessionViewModel) {
+        let newIdx = activeSeatIndex + delta
+        guard seatConfigs.indices.contains(newIdx) else { return }
+        Haptics.selection()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            selectSeat(newIdx + 1, vm: vm)
+        }
     }
 
     // MARK: - Bottom Bar
